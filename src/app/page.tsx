@@ -1,9 +1,14 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useRef } from "react";
 import Dropzone from "@/components/Dropzone";
 import { parseExcelBuffer, UnitRow } from "@/lib/parseExcel";
-import { renderDocx, TemplateData } from "@/lib/renderDocx";
+import {
+  docxToBaseHtml,
+  injectData,
+  htmlToPdfBlob,
+  TemplateData,
+} from "@/lib/generatePdf";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
@@ -25,6 +30,9 @@ export default function Home() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [progress, setProgress] = useState({ current: 0, total: 0 });
   const [error, setError] = useState<string | null>(null);
+
+  // --- Hidden render container ref ---
+  const renderRef = useRef<HTMLDivElement>(null);
 
   // --- Derived ---
   const isReady =
@@ -98,59 +106,41 @@ export default function Home() {
   });
 
   /**
-   * Phase 4: Bulk generation — loop rows, template docx, convert to PDF, zip all.
+   * Client-side bulk generation:
+   * mammoth (docx→HTML) → string replace (data inject) → html2pdf (DOM→PDF) → jszip → download
    */
   const handleGenerate = useCallback(async () => {
-    if (!docxFile || rows.length === 0) return;
+    if (!docxFile || rows.length === 0 || !renderRef.current) return;
 
     setIsGenerating(true);
     setError(null);
     setProgress({ current: 0, total: rows.length });
 
     try {
+      // Step 1: Convert template .docx → base HTML (once)
       const templateBuffer = await docxFile.arrayBuffer();
+      const baseHtml = await docxToBaseHtml(templateBuffer);
+
       const zip = new JSZip();
 
       for (let i = 0; i < rows.length; i++) {
         const row = rows[i];
         const data = buildTemplateData(row);
 
-        // 1. Render populated .docx in-memory
-        const populatedDocx = renderDocx(templateBuffer, data);
+        // Step 2+3: Inject styling + data into HTML copy
+        const populatedHtml = injectData(baseHtml, data);
 
-        // 2. Send to /api/convert for PDF conversion
-        const formData = new FormData();
-        const docxBuffer = new Uint8Array(populatedDocx).buffer;
-        formData.append(
-          "file",
-          new Blob([docxBuffer], {
-            type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-          }),
-          "document.docx"
-        );
+        // Step 4: Render to PDF blob via hidden DOM element
+        const pdfBlob = await htmlToPdfBlob(renderRef.current, populatedHtml);
 
-        const res = await fetch("/api/convert", {
-          method: "POST",
-          body: formData,
-        });
-
-        if (!res.ok) {
-          const errBody = await res.text();
-          throw new Error(
-            `PDF conversion failed for ${row["Unit No"]}: ${errBody}`
-          );
-        }
-
-        const pdfBuffer = await res.arrayBuffer();
-
-        // 3. Add PDF to zip
+        // Step 5: Add to zip
         const safeUnitNo = row["Unit No"].replace(/[^a-zA-Z0-9_-]/g, "_");
-        zip.file(`${safeUnitNo}_Disconnection_Notice.pdf`, pdfBuffer);
+        zip.file(`${safeUnitNo}_Disconnection_Notice.pdf`, pdfBlob);
 
         setProgress({ current: i + 1, total: rows.length });
       }
 
-      // 4. Generate and download zip
+      // Download zip
       const zipBlob = await zip.generateAsync({ type: "blob" });
       saveAs(zipBlob, "Bulk_Notices.zip");
     } catch (e) {
@@ -163,172 +153,189 @@ export default function Home() {
   }, [docxFile, rows, noticeDate, asOfDate, dueDate]);
 
   return (
-    <main className="mx-auto max-w-3xl px-6 py-12">
-      {/* Header */}
-      <header className="mb-10 border-b border-gray-200 pb-6">
-        <h1 className="text-2xl font-bold tracking-tight">
-          Disconnection Notice Generator
-        </h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Two Serendra — Internal Finance Tool
-        </p>
-      </header>
-
-      {/* Error Banner */}
-      {error && (
-        <div className="mb-6 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
-          {error}
-        </div>
-      )}
-
-      {/* --- Section 1: File Uploads --- */}
-      <section className="mb-10">
-        <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
-          1 / Upload Files
-        </h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
-          <Dropzone
-            label="Excel Data (.xlsx)"
-            accept={{
-              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
-                [".xlsx"],
-            }}
-            file={excelFile}
-            onFileAccepted={handleExcelUpload}
-          />
-          <Dropzone
-            label="Word Template (.docx)"
-            accept={{
-              "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
-                [".docx"],
-            }}
-            file={docxFile}
-            onFileAccepted={handleDocxUpload}
-          />
-        </div>
-        {rows.length > 0 && (
-          <p className="mt-3 text-xs text-gray-500">
-            ✓ Parsed <strong>{rows.length}</strong> unit rows from Sheet 1
+    <>
+      <main className="mx-auto max-w-3xl px-6 py-12">
+        {/* Header */}
+        <header className="mb-10 border-b border-gray-200 pb-6">
+          <h1 className="text-2xl font-bold tracking-tight">
+            Disconnection Notice Generator
+          </h1>
+          <p className="mt-1 text-sm text-gray-500">
+            Two Serendra — Internal Finance Tool
           </p>
+        </header>
+
+        {/* Error Banner */}
+        {error && (
+          <div className="mb-6 border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+            {error}
+          </div>
         )}
-      </section>
 
-      {/* --- Section 2: Date Inputs --- */}
-      <section className="mb-10">
-        <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
-          2 / Set Dates
-        </h2>
-        <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
-          <DateInput
-            label="Notice Date"
-            value={noticeDate}
-            onChange={setNoticeDate}
-          />
-          <DateInput
-            label="As Of Date"
-            value={asOfDate}
-            onChange={setAsOfDate}
-          />
-          <DateInput label="Due Date" value={dueDate} onChange={setDueDate} />
-        </div>
-      </section>
-
-      {/* --- Section 3: Preview Panel (Phase 2) --- */}
-      {rows.length > 0 && (
+        {/* --- Section 1: File Uploads --- */}
         <section className="mb-10">
           <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
-            3 / Preview Data Mapping
+            1 / Upload Files
           </h2>
-          <div className="border border-gray-200 bg-gray-50 p-4">
-            {/* Unit Selector */}
-            <div className="mb-4">
-              <label className="mb-1 block text-xs font-bold uppercase tracking-widest text-gray-500">
-                Select Unit
-              </label>
-              <select
-                value={selectedUnit}
-                onChange={(e) => setSelectedUnit(e.target.value)}
-                className="w-full border border-gray-300 bg-white px-3 py-2 text-sm focus:border-black focus:outline-none"
-              >
-                {rows.map((row) => (
-                  <option key={row["Unit No"]} value={row["Unit No"]}>
-                    {row["Unit No"]} — {row["Unit Owner"]}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            {/* Data Mapping Table */}
-            {selectedRow && (
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-gray-300 text-left">
-                    <th className="py-2 pr-4 text-xs font-bold uppercase tracking-widest text-gray-500">
-                      Template Tag
-                    </th>
-                    <th className="py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
-                      Value
-                    </th>
-                  </tr>
-                </thead>
-                <tbody className="font-mono text-xs">
-                  {Object.entries(buildTemplateData(selectedRow)).map(
-                    ([tag, value]) => (
-                      <tr
-                        key={tag}
-                        className="border-b border-gray-100"
-                      >
-                        <td className="py-2 pr-4 text-gray-600">
-                          {`{${tag}}`}
-                        </td>
-                        <td className="py-2 font-semibold text-black">
-                          {value || "—"}
-                        </td>
-                      </tr>
-                    )
-                  )}
-                </tbody>
-              </table>
-            )}
-          </div>
-        </section>
-      )}
-
-      {/* --- Section 4: Generate Button --- */}
-      <section className="border-t border-gray-200 pt-6">
-        <button
-          disabled={!isReady || isGenerating}
-          onClick={handleGenerate}
-          className={`w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
-            isReady && !isGenerating
-              ? "cursor-pointer bg-black text-white hover:bg-gray-800"
-              : "cursor-not-allowed bg-gray-100 text-gray-300"
-          }`}
-        >
-          {isGenerating
-            ? `Generating ${progress.current} of ${progress.total} PDFs...`
-            : "Generate & Download All PDFs"}
-        </button>
-
-        {/* Progress Bar */}
-        {isGenerating && progress.total > 0 && (
-          <div className="mt-3 h-1.5 w-full bg-gray-200">
-            <div
-              className="h-full bg-black transition-all duration-300"
-              style={{
-                width: `${(progress.current / progress.total) * 100}%`,
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
+            <Dropzone
+              label="Excel Data (.xlsx)"
+              accept={{
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet":
+                  [".xlsx"],
               }}
+              file={excelFile}
+              onFileAccepted={handleExcelUpload}
+            />
+            <Dropzone
+              label="Word Template (.docx)"
+              accept={{
+                "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
+                  [".docx"],
+              }}
+              file={docxFile}
+              onFileAccepted={handleDocxUpload}
             />
           </div>
+          {rows.length > 0 && (
+            <p className="mt-3 text-xs text-gray-500">
+              ✓ Parsed <strong>{rows.length}</strong> unit rows from Sheet 1
+            </p>
+          )}
+        </section>
+
+        {/* --- Section 2: Date Inputs --- */}
+        <section className="mb-10">
+          <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
+            2 / Set Dates
+          </h2>
+          <div className="grid grid-cols-1 gap-6 sm:grid-cols-3">
+            <DateInput
+              label="Notice Date"
+              value={noticeDate}
+              onChange={setNoticeDate}
+            />
+            <DateInput
+              label="As Of Date"
+              value={asOfDate}
+              onChange={setAsOfDate}
+            />
+            <DateInput label="Due Date" value={dueDate} onChange={setDueDate} />
+          </div>
+        </section>
+
+        {/* --- Section 3: Preview Panel --- */}
+        {rows.length > 0 && (
+          <section className="mb-10">
+            <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
+              3 / Preview Data Mapping
+            </h2>
+            <div className="border border-gray-200 bg-gray-50 p-4">
+              {/* Unit Selector */}
+              <div className="mb-4">
+                <label className="mb-1 block text-xs font-bold uppercase tracking-widest text-gray-500">
+                  Select Unit
+                </label>
+                <select
+                  value={selectedUnit}
+                  onChange={(e) => setSelectedUnit(e.target.value)}
+                  className="w-full border border-gray-300 bg-white px-3 py-2 text-sm focus:border-black focus:outline-none"
+                >
+                  {rows.map((row) => (
+                    <option key={row["Unit No"]} value={row["Unit No"]}>
+                      {row["Unit No"]} — {row["Unit Owner"]}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Data Mapping Table */}
+              {selectedRow && (
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="border-b border-gray-300 text-left">
+                      <th className="py-2 pr-4 text-xs font-bold uppercase tracking-widest text-gray-500">
+                        Template Tag
+                      </th>
+                      <th className="py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
+                        Value
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody className="font-mono text-xs">
+                    {Object.entries(buildTemplateData(selectedRow)).map(
+                      ([tag, value]) => (
+                        <tr
+                          key={tag}
+                          className="border-b border-gray-100"
+                        >
+                          <td className="py-2 pr-4 text-gray-600">
+                            {`{${tag}}`}
+                          </td>
+                          <td className="py-2 font-semibold text-black">
+                            {value || "—"}
+                          </td>
+                        </tr>
+                      )
+                    )}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </section>
         )}
 
-        {!isReady && !isGenerating && (
-          <p className="mt-2 text-center text-xs text-gray-400">
-            Upload both files and set all dates to enable
-          </p>
-        )}
-      </section>
-    </main>
+        {/* --- Section 4: Generate Button --- */}
+        <section className="border-t border-gray-200 pt-6">
+          <button
+            disabled={!isReady || isGenerating}
+            onClick={handleGenerate}
+            className={`w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
+              isReady && !isGenerating
+                ? "cursor-pointer bg-black text-white hover:bg-gray-800"
+                : "cursor-not-allowed bg-gray-100 text-gray-300"
+            }`}
+          >
+            {isGenerating
+              ? `Generating ${progress.current} of ${progress.total} PDFs...`
+              : "Generate & Download All PDFs"}
+          </button>
+
+          {/* Progress Bar */}
+          {isGenerating && progress.total > 0 && (
+            <div className="mt-3 h-1.5 w-full bg-gray-200">
+              <div
+                className="h-full bg-black transition-all duration-300"
+                style={{
+                  width: `${(progress.current / progress.total) * 100}%`,
+                }}
+              />
+            </div>
+          )}
+
+          {!isReady && !isGenerating && (
+            <p className="mt-2 text-center text-xs text-gray-400">
+              Upload both files and set all dates to enable
+            </p>
+          )}
+        </section>
+      </main>
+
+      {/* Hidden container for html2pdf DOM rendering — never visible */}
+      <div
+        ref={renderRef}
+        style={{
+          position: "fixed",
+          left: 0,
+          top: 0,
+          opacity: 0,
+          pointerEvents: "none",
+          zIndex: -1,
+          overflow: "hidden",
+        }}
+        aria-hidden="true"
+      />
+    </>
   );
 }
 

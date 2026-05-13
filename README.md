@@ -1,17 +1,19 @@
 # Two Serendra — Disconnection Notice Generator
 
-Internal finance tool for bulk-generating PDF disconnection notices by merging Excel data with Word templates.
+Internal finance tool for bulk-generating PDF disconnection notices by merging Excel data with Word templates. **100% client-side** — no Docker, no server-side conversion.
 
 ## Overview
 
-Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.docx` letter template. The tool merges each row into the template and converts them to PDFs via [Gotenberg](https://gotenberg.dev/), then downloads everything as a single ZIP file.
+Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.docx` letter template. The tool converts the template to HTML, injects each row's data, renders PDFs in the browser, then downloads everything as a single ZIP file.
 
 ### Key Features
 
 - **Excel Parsing** — Reads Sheet 1, extracts unit data, filters empty rows
-- **Mail Merge Support** — Automatically converts Word Mail Merge fields (`MERGEFIELD`) into template tags — no template modifications needed
+- **Word to HTML** — Uses `mammoth.js` to convert `.docx` → clean HTML
+- **Template Tags** — Supports `{Tag}`, `«Tag»`, and Word Mail Merge field display text
 - **Live Preview** — Select any unit to verify the data mapping before generating
-- **Bulk PDF Generation** — Converts all notices in one click with a progress indicator
+- **Client-Side PDFs** — `html2pdf.js` renders directly in the browser — no server needed
+- **Bulk Download** — All notices packaged into `Bulk_Notices.zip` via `jszip`
 - **Zero Persistence** — Everything runs in-memory; no files saved to disk, no database
 
 ## Tech Stack
@@ -21,14 +23,13 @@ Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.d
 | Framework | Next.js 15 (App Router) |
 | Styling | Tailwind CSS v4 |
 | Excel Parsing | SheetJS (`xlsx`) |
-| Word Templating | `docxtemplater` + `pizzip` |
-| PDF Conversion | Gotenberg (Docker) |
+| Word → HTML | `mammoth.js` |
+| HTML → PDF | `html2pdf.js` |
 | Zipping | `jszip` + `file-saver` |
 
 ## Prerequisites
 
 - **Node.js** ≥ 20
-- **Docker Desktop** — [Install here](https://docs.docker.com/get-docker/)
 
 ## Getting Started
 
@@ -38,23 +39,13 @@ Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.d
 npm install
 ```
 
-### 2. Start Gotenberg (PDF engine)
-
-```bash
-docker compose up
-```
-
-This pulls and runs Gotenberg on **port 3000**. First run will download the Docker image (~1 GB).
-
-### 3. Start the dev server
-
-In a separate terminal:
+### 2. Start the dev server
 
 ```bash
 npm run dev
 ```
 
-The app runs on **http://localhost:3001** (port 3001 to avoid conflict with Gotenberg).
+Open **http://localhost:3000**.
 
 ## Usage
 
@@ -83,7 +74,7 @@ The tool expects Sheet 1 with these columns:
 
 ## Template Tags
 
-The `.docx` template can use any of these formats — all are supported automatically:
+The `.docx` template can use any of these formats — all supported automatically:
 
 **Standard curly braces:**
 ```
@@ -91,36 +82,29 @@ The `.docx` template can use any of these formats — all are supported automati
 {Notice_Date}  {As_Of_Date}  {Due_Date}
 ```
 
-**Word Mail Merge fields** (Insert → Merge Field):
-The tool auto-converts these to curly-brace tags at processing time. No manual editing needed.
-
 **Chevron delimiters:**
 ```
 «Unit_No»  «Unit_Owner»  etc.
 ```
+
+**Word Mail Merge fields** — The display text (e.g., `«Unit_Owner»`) is extracted by mammoth and replaced automatically.
 
 ## Project Structure
 
 ```
 src/
 ├── app/
-│   ├── api/convert/route.ts   # Gotenberg proxy (docx → pdf)
 │   ├── globals.css
 │   ├── layout.tsx
 │   └── page.tsx               # Main UI (uploads, preview, generation)
 ├── components/
 │   └── Dropzone.tsx           # Reusable file upload dropzone
-└── lib/
-    ├── parseExcel.ts          # xlsx → typed JSON rows
-    ├── preprocessDocx.ts      # Mail Merge XML → {Tag} converter
-    └── renderDocx.ts          # docxtemplater rendering pipeline
+├── lib/
+│   ├── parseExcel.ts          # xlsx → typed JSON rows
+│   └── generatePdf.ts        # mammoth + html2pdf pipeline
+└── types/
+    └── html2pdf.d.ts          # Type declarations for html2pdf.js
 ```
-
-## Environment Variables
-
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GOTENBERG_URL` | `http://localhost:3000/forms/libreoffice/convert` | Gotenberg conversion endpoint |
 
 ## License
 
