@@ -186,6 +186,18 @@ export default function Home() {
         <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
           1 / Upload Files
         </h2>
+        <p className="mb-6 text-sm font-medium">
+          Please download and use the new{" "}
+          <a
+            href="https://docs.google.com/document/d/1lGMEMwYY6116qYBVSdQoQhDf3UgWvuQI/edit?usp=sharing&ouid=117655596563741381933&rtpof=true&sd=true"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="underline underline-offset-4 hover:text-blue-700 transition-colors"
+          >
+             RL Word template
+          </a>
+          . Do NOT use mail merge Word files.
+        </p>
         <div className="grid grid-cols-1 gap-6 sm:grid-cols-2">
           <Dropzone
             label="Excel Data (.xlsx)"
@@ -195,6 +207,7 @@ export default function Home() {
             }}
             file={excelFile}
             onFileAccepted={handleExcelUpload}
+            required
           />
           <Dropzone
             label="Word Template (.docx)"
@@ -204,13 +217,16 @@ export default function Home() {
             }}
             file={docxFile}
             onFileAccepted={handleDocxUpload}
+            required
           />
+          
         </div>
         {rows.length > 0 && (
           <p className="mt-3 text-xs text-gray-500">
             ✓ Parsed <strong>{rows.length}</strong> unit rows from Sheet 1
           </p>
         )}
+        
       </section>
 
       {/* --- Section 2: Date Inputs --- */}
@@ -223,13 +239,15 @@ export default function Home() {
             label="Notice Date"
             value={noticeDate}
             onChange={setNoticeDate}
+            required
           />
           <DateInput
             label="As Of Date"
             value={asOfDate}
             onChange={setAsOfDate}
+            required
           />
-          <DateInput label="Due Date" value={dueDate} onChange={setDueDate} />
+          <DateInput label="Due Date" value={dueDate} onChange={setDueDate} required />
         </div>
       </section>
 
@@ -338,15 +356,18 @@ function DateInput({
   label,
   value,
   onChange,
+  required,
 }: {
   label: string;
   value: string;
   onChange: (v: string) => void;
+  required?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-2">
       <label className="text-xs font-bold uppercase tracking-widest text-gray-500">
         {label}
+        {required && <span className="ml-1 text-red-500">*</span>}
       </label>
       <input
         type="date"

@@ -8,6 +8,7 @@ interface DropzoneProps {
   accept: Accept;
   file: File | null;
   onFileAccepted: (file: File) => void;
+  required?: boolean;
 }
 
 export default function Dropzone({
@@ -15,6 +16,7 @@ export default function Dropzone({
   accept,
   file,
   onFileAccepted,
+  required,
 }: DropzoneProps) {
   const onDrop = useCallback(
     (acceptedFiles: File[]) => {
@@ -36,6 +38,7 @@ export default function Dropzone({
     <div className="flex flex-col gap-2">
       <label className="text-xs font-bold uppercase tracking-widest text-gray-500">
         {label}
+        {required && <span className="ml-1 text-red-500">*</span>}
       </label>
       <div
         {...getRootProps()}
