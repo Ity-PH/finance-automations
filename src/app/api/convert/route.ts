@@ -1,9 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
 const GOTENBERG_URL =
-  process.env.GOTENBERG_URL ||
-  "http://localhost:3000/forms/libreoffice/convert";
-
+  process.env.GOTENBERG_URL;
 /**
  * POST /api/convert
  * Accepts a .docx file as multipart/form-data (field: "file"),
@@ -21,13 +19,22 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const user = process.env.SERVICE_USER_GOTENBERG;
+    const pass = process.env.SERVICE_PASSWORD_GOTENBERG;
+    if (!user || !pass) {
+      return NextResponse.json({ error: "Missing Gotenberg credentials" }, { status: 500 });
+    }
+
     // Build multipart payload for Gotenberg
     const gotenbergForm = new FormData();
     gotenbergForm.append("files", file, "document.docx");
 
-    const gotenbergResponse = await fetch(GOTENBERG_URL, {
+    const gotenbergResponse = await fetch(`${GOTENBERG_URL}/forms/libreoffice/convert`, {
       method: "POST",
       body: gotenbergForm,
+      headers: {
+        Authorization: 'Basic ' + Buffer.from(`${user}:${pass}`).toString('base64'),
+      },
     });
 
     if (!gotenbergResponse.ok) {

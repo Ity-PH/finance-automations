@@ -22,13 +22,12 @@ Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.d
 | Styling | Tailwind CSS v4 |
 | Excel Parsing | SheetJS (`xlsx`) |
 | Word Templating | `docxtemplater` + `pizzip` |
-| PDF Conversion | Gotenberg (Docker) |
+| PDF Conversion | Gotenberg (Cloud Deployed) |
 | Zipping | `jszip` + `file-saver` |
 
 ## Prerequisites
 
 - **Node.js** ≥ 20
-- **Docker Desktop** — [Install here](https://docs.docker.com/get-docker/)
 
 ## Getting Started
 
@@ -38,15 +37,7 @@ Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.d
 npm install
 ```
 
-### 2. Start Gotenberg (PDF engine)
-
-```bash
-docker compose up
-```
-
-This pulls and runs Gotenberg on **port 3000**. First run will download the Docker image (~1 GB).
-
-### 3. Start the dev server
+### 2. Start the dev server
 
 In a separate terminal:
 
@@ -54,7 +45,7 @@ In a separate terminal:
 npm run dev
 ```
 
-The app runs on **http://localhost:3001** (port 3001 to avoid conflict with Gotenberg).
+The app runs on **http://localhost:3001**.
 
 ## Usage
 
@@ -118,9 +109,7 @@ src/
 
 ## Environment Variables
 
-| Variable | Default | Description |
-|----------|---------|-------------|
-| `GOTENBERG_URL` | `http://localhost:3000/forms/libreoffice/convert` | Gotenberg conversion endpoint |
+Ensure you have `GOTENBERG_URL`, `SERVICE_USER`, and `SERVICE_PASSWORD` in your environment variables to let the .docx to PDF conversion work smoothly.
 
 ## License
 
