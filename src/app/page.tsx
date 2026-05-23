@@ -143,9 +143,9 @@ export default function Home() {
 
         const pdfBuffer = await res.arrayBuffer();
 
-        // 3. Add PDF to zip
-        const safeUnitNo = row["Unit No"].replace(/[^a-zA-Z0-9_-]/g, "_");
-        zip.file(`${safeUnitNo}_Disconnection_Notice.pdf`, pdfBuffer);
+        // 3. Add PDF to zip using the new format (Tower-0123)
+        const formattedUnitNo = formatUnitFilename(row["Unit No"]);
+        zip.file(`${formattedUnitNo}_Disconnection_Notice.pdf`, pdfBuffer);
 
         setProgress({ current: i + 1, total: rows.length });
       }
@@ -350,7 +350,7 @@ export default function Home() {
   );
 }
 
-/* ─── Inline sub-component ─── */
+/* ─── Inline sub-components ─── */
 
 function DateInput({
   label,
@@ -377,4 +377,24 @@ function DateInput({
       />
     </div>
   );
+}
+
+/**
+ * Converts unit strings like "123A" or "A123" into "A-0123"
+ */
+function formatUnitFilename(rawUnit: string): string {
+  // Extract all alphabetical characters and make them uppercase
+  const letters = rawUnit.replace(/[^a-zA-Z]/g, "").toUpperCase();
+  // Extract all digits
+  const numbers = rawUnit.replace(/[^0-9]/g, "");
+
+  // If the unit has both letters and numbers, format it properly
+  if (letters && numbers) {
+    // Pad the extracted numbers to ensure it is always at least 4 digits
+    const paddedNumber = numbers.padStart(4, "0");
+    return `${letters}-${paddedNumber}`;
+  }
+
+  // Fallback: If it's a weird format (e.g. only numbers), just make it URL safe
+  return rawUnit.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
