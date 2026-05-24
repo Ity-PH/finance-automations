@@ -346,6 +346,27 @@ export default function Home() {
           </p>
         )}
       </section>
+
+      {/* --- RabbitMQ Test --- */}
+      <section className="mt-10 border-t border-gray-200 pt-6">
+        <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
+          Dev / Queue Test
+        </h2>
+        <button
+          onClick={async () => {
+            try {
+              const res = await fetch('/api/queue-email', { method: 'POST' });
+              const data = await res.json();
+              console.log('Queue response:', data);
+            } catch (err) {
+              console.error('Queue error:', err);
+            }
+          }}
+          className="w-full cursor-pointer bg-blue-600 py-3 text-sm font-bold uppercase tracking-widest text-white transition-colors hover:bg-blue-700"
+        >
+          Send Test Queue Email
+        </button>
+      </section>
     </main>
   );
 }
