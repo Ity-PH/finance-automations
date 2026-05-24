@@ -9,7 +9,12 @@ const QUEUE = 'email_dispatch';
 interface EmailJob {
   to: string;
   subject: string;
-  body: string;
+  body?: string;
+  html?: string;
+  customerName?: string;
+  unitCode?: string;
+  filename?: string;
+  pdfBase64?: string;
 }
 
 async function start() {
@@ -28,6 +33,7 @@ async function start() {
     console.log(`Received job: send email to ${job.to}`);
 
     try {
+      // TODO: Create auth credentials once outside callback rather than per message?
       const transporter = nodemailer.createTransport({
         service: 'gmail',
         auth: {
@@ -39,13 +45,30 @@ async function start() {
         },
       });
 
-      const result = await transporter.sendMail({
+      // Build mail options based on job type
+      const mailOptions: nodemailer.SendMailOptions = {
         from: `Serendra Finance <${process.env.EMAIL_USER}>`,
         to: job.to,
         subject: job.subject,
-        text: job.body,
-        html: `<p>${job.body}</p>`,
-      });
+      };
+
+      if (job.pdfBase64) {
+        // New shape: notice with PDF attachment
+        mailOptions.html = job.html;
+        mailOptions.attachments = [
+          {
+            filename: job.filename,
+            content: Buffer.from(job.pdfBase64, 'base64'),
+            contentType: 'application/pdf',
+          },
+        ];
+      } else {
+        // Old shape: simple test email
+        mailOptions.text = job.body;
+        mailOptions.html = `<p>${job.body}</p>`;
+      }
+
+      const result = await transporter.sendMail(mailOptions);
 
       console.log(`Email sent successfully. Message ID: ${result.messageId}`);
 

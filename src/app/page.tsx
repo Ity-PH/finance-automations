@@ -7,6 +7,7 @@ import { renderDocx, TemplateData } from "@/lib/renderDocx";
 import { formatUnitFilename } from "@/lib/utils";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
+import TabNav from "@/components/TabNav";
 
 export default function Home() {
   // --- File State ---
@@ -165,6 +166,8 @@ export default function Home() {
 
   return (
     <main className="mx-auto max-w-3xl px-6 py-12">
+      <TabNav />
+
       {/* Header */}
       <header className="mb-10 border-b border-gray-200 pb-6">
         <h1 className="text-2xl font-bold tracking-tight">
