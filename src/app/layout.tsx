@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Two Serendra — Disconnection Notice Generator",
+  title: "Two Serendra — Disconnection Notice Automations",
   description:
     "Internal tool for bulk-generating PDF disconnection notices from Excel data and Word templates.",
 };
