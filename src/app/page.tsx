@@ -4,6 +4,7 @@ import { useState, useCallback } from "react";
 import Dropzone from "@/components/Dropzone";
 import { parseExcelBuffer, UnitRow } from "@/lib/parseExcel";
 import { renderDocx, TemplateData } from "@/lib/renderDocx";
+import { formatUnitFilename } from "@/lib/utils";
 import JSZip from "jszip";
 import { saveAs } from "file-saver";
 
@@ -167,10 +168,10 @@ export default function Home() {
       {/* Header */}
       <header className="mb-10 border-b border-gray-200 pb-6">
         <h1 className="text-2xl font-bold tracking-tight">
-          Disconnection Notice Generator
+          Disconnection Notice Automations
         </h1>
         <p className="mt-1 text-sm text-gray-500">
-          Two Serendra — Internal Finance Tool
+          Internal tool for Two Serendra Finance to generate and dispatch disconnection notices.
         </p>
       </header>
 
@@ -398,24 +399,4 @@ function DateInput({
       />
     </div>
   );
-}
-
-/**
- * Converts unit strings like "123A" or "A123" into "A-0123"
- */
-function formatUnitFilename(rawUnit: string): string {
-  // Extract all alphabetical characters and make them uppercase
-  const letters = rawUnit.replace(/[^a-zA-Z]/g, "").toUpperCase();
-  // Extract all digits
-  const numbers = rawUnit.replace(/[^0-9]/g, "");
-
-  // If the unit has both letters and numbers, format it properly
-  if (letters && numbers) {
-    // Pad the extracted numbers to ensure it is always at least 4 digits
-    const paddedNumber = numbers.padStart(4, "0");
-    return `${letters}-${paddedNumber}`;
-  }
-
-  // Fallback: If it's a weird format (e.g. only numbers), just make it URL safe
-  return rawUnit.replace(/[^a-zA-Z0-9_-]/g, "_");
 }
