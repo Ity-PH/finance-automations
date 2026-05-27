@@ -14,9 +14,34 @@ export interface UnitRow {
 }
 
 /**
- * Parse Sheet 1 of an Excel buffer into typed row objects.
- * Filters out rows missing a valid "Unit No".
+ * Safely parses messy Excel currency values (strings with commas, dashes, etc.) into strict numbers.
  */
+function parseCurrency(val: unknown): number {
+  if (typeof val === "number") return val;
+  
+  if (typeof val === "string") {
+    const cleanStr = val.replace(/,/g, "").trim();
+    if (cleanStr === "-" || cleanStr === "") return 0; // Handle Excel accounting dashes
+    
+    const parsed = Number(cleanStr);
+    return isNaN(parsed) ? 0 : parsed;
+  }
+  
+  return 0;
+}
+
+/**
+ * Excel headers often have accidental spaces (e.g., " WA " instead of "WA").
+ * This creates a new object where all keys are perfectly trimmed.
+ */
+function normalizeRowKeys(row: Record<string, unknown>): Record<string, unknown> {
+  const normalized: Record<string, unknown> = {};
+  for (const key of Object.keys(row)) {
+    normalized[key.trim()] = row[key];
+  }
+  return normalized;
+}
+
 export function parseExcelBuffer(buffer: ArrayBuffer): UnitRow[] {
   const workbook = XLSX.read(buffer, { type: "array" });
   const sheetName = workbook.SheetNames[0];
@@ -27,20 +52,24 @@ export function parseExcelBuffer(buffer: ArrayBuffer): UnitRow[] {
   });
 
   return raw
+    // 1. Normalize the keys first so " WA " becomes "WA"
+    .map(normalizeRowKeys)
+    // 2. Filter out rows missing a Unit No
     .filter((row) => {
       const unitNo = String(row["Unit No"] ?? "").trim();
       return unitNo.length > 0;
     })
+    // 3. Map safely
     .map((row) => ({
-      Section: String(row["Section"] ?? "").trim(),
+      Section: String(row.Section ?? "").trim(),
       "UO-Code": String(row["UO-Code"] ?? "").trim(),
       "Unit No": String(row["Unit No"] ?? "").trim(),
       "Unit Owner": String(row["Unit Owner"] ?? "").trim(),
-      "TOTAL OUTSTANDING BALANCE": Number(row["TOTAL OUTSTANDING BALANCE"]) || 0,
-      WA: Number(row["WA"]) || 0,
-      AD: Number(row["AD"]) || 0,
-      OT: Number(row["OT"]) || 0,
-      EL: Number(row["EL"]) || 0,
-      REMARKS: String(row["REMARKS"] ?? "").trim(),
+      "TOTAL OUTSTANDING BALANCE": parseCurrency(row["TOTAL OUTSTANDING BALANCE"]),
+      WA: parseCurrency(row.WA),
+      AD: parseCurrency(row.AD),
+      OT: parseCurrency(row.OT),
+      EL: parseCurrency(row.EL),
+      REMARKS: String(row.REMARKS ?? "").trim(),
     }));
 }
