@@ -2,6 +2,9 @@
 
 Internal finance tool for bulk-generating PDF disconnection notices by merging Excel data with Word templates.
 
+## DEPRECATED
+Note that this repository is no longer in use. Look for `Ity/finance-tools` repository for the updated version of this tool.
+
 ## Overview
 
 Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.docx` letter template. The tool merges each row into the template and converts them to PDFs via [Gotenberg](https://gotenberg.dev/), then downloads everything as a single ZIP file.
