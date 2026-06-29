@@ -12,22 +12,20 @@ import {
 export type BreakdownCredentials = {
   bpcode: string;
   district: "LR" | "HR";
-  unitNo?: string;
 };
 
-const STORAGE_KEY = "finance-soa-breakdown-credentials";
+const LEGACY_STORAGE_KEY = "finance-soa-breakdown-credentials";
 
 type CredentialContextValue = {
   credentials: BreakdownCredentials;
+  showBreakdown: boolean;
   hasCredentials: boolean;
-  isHydrated: boolean;
-  saveCredentials: (next: BreakdownCredentials) => void;
+  viewBreakdown: (next: BreakdownCredentials) => void;
 };
 
 const defaultCredentials: BreakdownCredentials = {
   bpcode: "",
   district: "HR",
-  unitNo: "",
 };
 
 const CredentialContext = createContext<CredentialContextValue | null>(null);
@@ -39,43 +37,30 @@ export function SoaBreakdownCredentialProvider({
 }) {
   const [credentials, setCredentials] =
     useState<BreakdownCredentials>(defaultCredentials);
-  const [isHydrated, setIsHydrated] = useState(false);
+  const [showBreakdown, setShowBreakdown] = useState(false);
 
   useEffect(() => {
-    const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      try {
-        const parsed = JSON.parse(raw) as Partial<BreakdownCredentials>;
-        setCredentials({
-          bpcode: parsed.bpcode?.trim() ?? "",
-          district: parsed.district === "LR" ? "LR" : "HR",
-          unitNo: parsed.unitNo?.trim() ?? "",
-        });
-      } catch {
-        window.localStorage.removeItem(STORAGE_KEY);
-      }
-    }
-    setIsHydrated(true);
+    window.localStorage.removeItem(LEGACY_STORAGE_KEY);
   }, []);
 
-  const saveCredentials = useCallback((next: BreakdownCredentials) => {
+  const viewBreakdown = useCallback((next: BreakdownCredentials) => {
     const normalized: BreakdownCredentials = {
       bpcode: next.bpcode.trim().toUpperCase(),
       district: next.district,
-      unitNo: next.unitNo?.trim() ?? "",
     };
     setCredentials(normalized);
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
+    setShowBreakdown(true);
   }, []);
 
   const value = useMemo<CredentialContextValue>(
     () => ({
       credentials,
-      hasCredentials: credentials.bpcode.trim().length > 0,
-      isHydrated,
-      saveCredentials,
+      showBreakdown,
+      hasCredentials:
+        showBreakdown && credentials.bpcode.trim().length > 0,
+      viewBreakdown,
     }),
-    [credentials, isHydrated, saveCredentials],
+    [credentials, showBreakdown, viewBreakdown],
   );
 
   return (

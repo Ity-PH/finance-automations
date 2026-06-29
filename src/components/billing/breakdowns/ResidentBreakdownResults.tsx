@@ -56,7 +56,6 @@ function defaultMonthSelection(today = new Date()) {
 async function fetchPastLedger(
   bpcode: string,
   district: "LR" | "HR",
-  unitNo: string | undefined,
   dateFrom: string,
   dateTo: string,
   kind: "fee" | "payment",
@@ -64,7 +63,6 @@ async function fetchPastLedger(
   const params = new URLSearchParams({
     bpcode,
     district,
-    unit_no: unitNo ?? "",
     date_from: dateFrom,
     date_to: dateTo,
     kind,
@@ -82,8 +80,7 @@ export function ResidentBreakdownResults() {
   const searchParams = useSearchParams();
   const kind = searchParams.get("kind") === "payment" ? "payment" : "fee";
   const isPayment = kind === "payment";
-  const { credentials, hasCredentials, isHydrated } =
-    useSoaBreakdownCredentials();
+  const { credentials, hasCredentials } = useSoaBreakdownCredentials();
 
   const defaultMonths = useMemo(() => defaultMonthSelection(), []);
   const yearOptions = useMemo(() => {
@@ -131,7 +128,6 @@ export function ResidentBreakdownResults() {
       "resident-past-ledger",
       credentials.bpcode,
       credentials.district,
-      credentials.unitNo,
       dateFrom,
       dateTo,
       kind,
@@ -140,12 +136,11 @@ export function ResidentBreakdownResults() {
       fetchPastLedger(
         credentials.bpcode,
         credentials.district,
-        credentials.unitNo,
         dateFrom,
         dateTo,
         kind,
       ),
-    enabled: isHydrated && hasCredentials && dateFrom !== "" && dateTo !== "",
+    enabled: hasCredentials && dateFrom !== "" && dateTo !== "",
   });
 
   const displayRows = useMemo(() => {
@@ -156,14 +151,10 @@ export function ResidentBreakdownResults() {
 
   const total = displayRows.reduce((sum, row) => sum + Math.abs(row.amount), 0);
 
-  if (!isHydrated) {
-    return <p className="text-sm text-gray-500">Loading saved credentials...</p>;
-  }
-
   if (!hasCredentials) {
     return (
       <div className="border border-gray-200 bg-white p-6 text-sm text-gray-600">
-        Save credentials on the{" "}
+        Enter customer details and click View Breakdown on the{" "}
         <Link href="/soa-breakdown" className="font-semibold text-blue-600">
           SOA Breakdown page
         </Link>{" "}

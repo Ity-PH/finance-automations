@@ -19,15 +19,10 @@ import type { ResidentLedgerResponse } from "@/lib/schema/resident-breakdown.sch
 type ApiResponse<T> = { success: boolean; data?: T; error?: string };
 type BreakdownView = "fee" | "payment";
 
-async function fetchOutstandingView(
-  bpcode: string,
-  district: "LR" | "HR",
-  unitNo?: string,
-) {
+async function fetchOutstandingView(bpcode: string, district: "LR" | "HR") {
   const params = new URLSearchParams({
     bpcode,
     district,
-    unit_no: unitNo ?? "",
     outstanding_view: "true",
   });
   const response = await fetch(`/api/soa-breakdown/outstanding?${params}`);
@@ -49,8 +44,7 @@ function formatBalanceDisplay(raw?: string): string {
 
 export function ResidentBreakdownRequest() {
   const router = useRouter();
-  const { credentials, hasCredentials, isHydrated } =
-    useSoaBreakdownCredentials();
+  const { credentials, hasCredentials } = useSoaBreakdownCredentials();
   const [view, setView] = useState<BreakdownView>("fee");
   const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
@@ -61,15 +55,10 @@ export function ResidentBreakdownRequest() {
       "resident-outstanding-view",
       credentials.bpcode,
       credentials.district,
-      credentials.unitNo,
     ],
     queryFn: () =>
-      fetchOutstandingView(
-        credentials.bpcode,
-        credentials.district,
-        credentials.unitNo,
-      ),
-    enabled: isHydrated && hasCredentials,
+      fetchOutstandingView(credentials.bpcode, credentials.district),
+    enabled: hasCredentials,
   });
 
   const slowMessage = useSlowLoadingMessage(outstandingQuery.isLoading);
@@ -118,16 +107,8 @@ export function ResidentBreakdownRequest() {
     router.push(`/soa-breakdown/results?kind=${kind}`);
   };
 
-  if (!isHydrated) {
-    return <p className="text-sm text-gray-500">Loading saved credentials...</p>;
-  }
-
   if (!hasCredentials) {
-    return (
-      <div className="border border-gray-200 bg-white p-6 text-sm text-gray-600">
-        Save a UO code and district above to load SOA breakdown.
-      </div>
-    );
+    return null;
   }
 
   return (
