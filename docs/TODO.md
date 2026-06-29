@@ -11,6 +11,7 @@
 ### Email
 1. Use Elastic Mail (follow email-app implementation)
 2. Use Email database from internal tools 
+3. just disable the send email part for now
 
 ### Authentication & Security
 1. Login (use OTP + whitelist email?)
