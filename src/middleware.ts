@@ -19,5 +19,10 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/soa-breakdown/:path*", "/api/soa-breakdown/:path*"],
+  matcher: [
+    "/soa-breakdown/:path*",
+    "/api/soa-breakdown/:path*",
+    "/ebt-inspector/:path*",
+    "/api/ebt-inspector/:path*",
+  ],
 };

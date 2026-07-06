@@ -11,6 +11,7 @@ import {
   type ReconcileLaneResult,
 } from "@/lib/billing/floating-balance";
 import { codeFromDocNo, resolveInterestCode } from "@/lib/utils/code-utils";
+import { isAdjustmentArinvoiceRemarks } from "@/lib/utils/balance-row-utils";
 import { parseApiDate } from "@/lib/utils/breakdown-date-utils";
 import {
   formatCurrency,
@@ -68,15 +69,18 @@ class ResidentBreakdownService {
           ledger: ledgerRows,
         } = outstandingData;
 
-        const duesFeeRows = balanceRows.filter(
-          (row) => (row.type ?? "").toLowerCase() === "arinvoice",
-        );
+        // arcreditmemo (negative) nets against fees in sumOutstandingFees so
+        // derivedCredit stays correct. It is NOT displayed (normalizeBalanceRows
+        // shows arinvoice only); it only feeds the reconciliation math here.
+        const isFeeRow = (row: { type?: string }) => {
+          const type = (row.type ?? "").toLowerCase();
+          return type === "arinvoice" || type === "arcreditmemo";
+        };
+        const duesFeeRows = balanceRows.filter(isFeeRow);
         const duesPaymentRows = balanceRows.filter(
           (row) => (row.type ?? "").toLowerCase() === "downpayment",
         );
-        const electricityFeeRows = electricityRows.filter(
-          (row) => (row.type ?? "").toLowerCase() === "arinvoice",
-        );
+        const electricityFeeRows = electricityRows.filter(isFeeRow);
         const electricityPaymentRows = electricityRows.filter(
           (row) => (row.type ?? "").toLowerCase() === "downpayment",
         );
@@ -163,8 +167,12 @@ class ResidentBreakdownService {
         );
 
         const normalizedRows = [
-          ...this.normalizeBalanceRows(balanceRows, null, null),
-          ...this.normalizeElectricityRows(electricityRows, null, null),
+          ...this.normalizeBalanceRows(balanceRows, null, null, {
+            excludeAdjustmentFees: true,
+          }),
+          ...this.normalizeElectricityRows(electricityRows, null, null, {
+            excludeAdjustmentFees: true,
+          }),
           ...toUncreditedPaymentRows(duesReconciliation.displayed),
           ...toUncreditedPaymentRows(electricityReconciliation.displayed),
         ];
@@ -352,11 +360,23 @@ class ResidentBreakdownService {
     rows: BalanceApiRow[],
     start: Date | null,
     end: Date | null,
+    options?: { excludeAdjustmentFees?: boolean },
   ): ResidentBreakdownRow[] {
     return rows
-      .filter(
-        (row) => this.isArinvoice(row) && this.isInDateRange(row, start, end),
-      )
+      .filter((row) => {
+        if (!this.isArinvoice(row) || !this.isInDateRange(row, start, end)) {
+          return false;
+        }
+
+        if (
+          options?.excludeAdjustmentFees &&
+          isAdjustmentArinvoiceRemarks(row.remarks ?? "")
+        ) {
+          return false;
+        }
+
+        return true;
+      })
       .map((row) => {
         const selectedAmount = row.dueamount || row.amount || "0";
         const amount = parseMoney(selectedAmount);
@@ -383,11 +403,23 @@ class ResidentBreakdownService {
     rows: ElectricityApiRow[],
     start: Date | null,
     end: Date | null,
+    options?: { excludeAdjustmentFees?: boolean },
   ): ResidentBreakdownRow[] {
     return rows
-      .filter(
-        (row) => this.isArinvoice(row) && this.isInDateRange(row, start, end),
-      )
+      .filter((row) => {
+        if (!this.isArinvoice(row) || !this.isInDateRange(row, start, end)) {
+          return false;
+        }
+
+        if (
+          options?.excludeAdjustmentFees &&
+          isAdjustmentArinvoiceRemarks(row.remarks ?? "")
+        ) {
+          return false;
+        }
+
+        return true;
+      })
       .map((row) => {
         const selectedAmount = row.dueamount || row.amount || "0";
         const amount = parseMoney(selectedAmount);

@@ -6,6 +6,7 @@ import { usePathname } from "next/navigation";
 const tabs = [
   { label: "Generate Notices", href: "/" },
   { label: "SOA Breakdown", href: "/soa-breakdown" },
+  { label: "EBT Inspector", href: "/ebt-inspector" },
 ];
 
 export default function TabNav() {

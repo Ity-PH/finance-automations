@@ -13,6 +13,7 @@ type OutstandingFeesProps = {
   onRetry: () => void;
   selectedRowIds: Set<string>;
   onToggleRow: (id: string) => void;
+  onToggleSelectAll: () => void;
   onSeePast: () => void;
 };
 
@@ -23,19 +24,36 @@ export function OutstandingFees({
   onRetry,
   selectedRowIds,
   onToggleRow,
+  onToggleSelectAll,
   onSeePast,
 }: OutstandingFeesProps) {
+  const visibleRowIds = rows.map((row) => `${row.source}-${row.docno}`);
+  const allVisibleSelected =
+    visibleRowIds.length > 0 &&
+    visibleRowIds.every((id) => selectedRowIds.has(id));
+
   return (
     <section className="border border-gray-200 bg-white p-5">
-      <div className="mb-5 flex items-center justify-between">
+      <div className="mb-5 flex items-center justify-between gap-4">
         <h3 className="text-lg font-bold">Outstanding Fees</h3>
-        <button
-          type="button"
-          onClick={onSeePast}
-          className="text-sm font-semibold text-blue-600 hover:text-blue-800"
-        >
-          See Past Fees
-        </button>
+        <div className="flex items-center gap-4">
+          {!isLoading && !isError && rows.length > 0 && (
+            <button
+              type="button"
+              onClick={onToggleSelectAll}
+              className="text-sm font-semibold text-green-700 hover:text-green-900"
+            >
+              {allVisibleSelected ? "Unselect All" : "Select All"}
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onSeePast}
+            className="shrink-0 text-sm font-semibold text-blue-600 hover:text-blue-800"
+          >
+            See Past Fees
+          </button>
+        </div>
       </div>
 
       {isLoading && <LoadingRows count={4} />}
