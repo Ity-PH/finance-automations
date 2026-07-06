@@ -5,6 +5,10 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import {
+  filterRowsByCategories,
+  type FeeCategoryId,
+} from "@/lib/utils/fee-categories";
 import { InspectedUnitLabel } from "@/components/billing/breakdowns/InspectedUnitLabel";
 import { PastFees } from "@/components/billing/breakdowns/PastFees";
 import { PastPayments } from "@/components/billing/breakdowns/PastPayments";
@@ -99,7 +103,9 @@ export function ResidentBreakdownResults() {
   );
   const [customEndMonth, setCustomEndMonth] = useState(defaultMonths.endMonth);
   const [customEndYear, setCustomEndYear] = useState(defaultMonths.endYear);
-  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  const [selectedCategories, setSelectedCategories] = useState<
+    Set<FeeCategoryId>
+  >(new Set());
 
   const { dateFrom, dateTo } = useMemo(() => {
     if (useCustom) {
@@ -146,9 +152,9 @@ export function ResidentBreakdownResults() {
 
   const displayRows = useMemo(() => {
     const rows = ledgerQuery.data?.rows ?? [];
-    if (isPayment || selectedCodes.size === 0) return rows;
-    return rows.filter((row) => selectedCodes.has(row.resolvedCode));
-  }, [isPayment, ledgerQuery.data?.rows, selectedCodes]);
+    if (isPayment) return rows;
+    return filterRowsByCategories(rows, selectedCategories);
+  }, [isPayment, ledgerQuery.data?.rows, selectedCategories]);
 
   const total = displayRows.reduce((sum, row) => sum + Math.abs(row.amount), 0);
 
@@ -215,8 +221,8 @@ export function ResidentBreakdownResults() {
 
       {!isPayment && (
         <CategoryPills
-          selectedCodes={selectedCodes}
-          onChange={setSelectedCodes}
+          selectedCategories={selectedCategories}
+          onChange={setSelectedCategories}
         />
       )}
 
