@@ -52,6 +52,10 @@ function isDownpayment(row: { type?: string }): boolean {
   return (row.type ?? "").toLowerCase() === "downpayment";
 }
 
+function isArcreditmemo(row: { type?: string }): boolean {
+  return (row.type ?? "").toLowerCase() === "arcreditmemo";
+}
+
 function normalizeText(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -74,9 +78,23 @@ export function splitCsv(value: string | string[] | undefined | null): string[] 
 }
 
 export function sumOutstandingFees(rows: BalanceLikeRow[]): number {
-  return rows
-    .filter(isArinvoice)
-    .reduce((sum, row) => sum + parseMoney(row.dueamount), 0);
+  return rows.reduce((sum, row) => {
+    if (isArinvoice(row)) return sum + parseMoney(row.dueamount);
+    // Only a CREDIT-side (negative dueamount) arcreditmemo nets against fees;
+    // it is hidden from the resident's list (normalizeBalanceRows shows arinvoice
+    // only) but MUST count here or derivedCredit is overstated and reconcile
+    // wrongly falls to "aggregate_only" (e.g. a -500 Pet-ID reversal).
+    // Positive arcreditmemo rows are stale reversed-invoice artifacts NOT in the
+    // ledger balance (e.g. UO-00803's 2023 rows of 28k/158k); counting them would
+    // massively overstate derivedCredit and hide legit advances.
+    // ponytail: sign heuristic; if a positive arcreditmemo ever needs to count,
+    // switch to matching against the ledger balance instead.
+    if (isArcreditmemo(row)) {
+      const due = parseMoney(row.dueamount);
+      return due < 0 ? sum + due : sum;
+    }
+    return sum;
+  }, 0);
 }
 
 export function getLedgerFinalBalance(ledgerRows: LedgerApiRow[]): number {
@@ -310,8 +328,17 @@ export function reconcileDownpaymentCandidates(
     return { displayed: greedyRemaining, hidden, mode: "subset" };
   }
 
-  if (active.length <= 12) {
-    return { displayed: [], hidden: candidates, mode: "aggregate_only" };
+  // Fallback: isLedgerExhausted over-counts a credit memo that is shared by
+  // several payments (its full credit is attributed to each), which can falsely
+  // flag a still-floating payment as exhausted and empty `active`. Before giving
+  // up, subset-sum over ALL candidates against the trusted derivedCredit.
+  if (candidates.length <= 12) {
+    const fullSubset = subsetSum(candidates, derivedTotalCredit, tolerance);
+    if (fullSubset && fullSubset.length > 0) {
+      const displayedDocnos = new Set(fullSubset.map((row) => row.docno));
+      const hidden = candidates.filter((row) => !displayedDocnos.has(row.docno));
+      return { displayed: fullSubset, hidden, mode: "subset" };
+    }
   }
 
   return { displayed: [], hidden: candidates, mode: "aggregate_only" };

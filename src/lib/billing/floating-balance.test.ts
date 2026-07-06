@@ -349,6 +349,110 @@ describe("floating-balance", () => {
     expect(result.displayed).toHaveLength(0);
   });
 
+  it("803 dues lane — positive arcreditmemo artifacts must NOT inflate fees", () => {
+    // UO-00803: stale 2023 A/R credit memos appear on the balance table with
+    // large POSITIVE dueamounts but are not in the ledger balance. Only the
+    // negative (-500 Pet-ID reversal) arcreditmemo nets against fees; the
+    // positive ones must be ignored, else derivedCredit explodes and the two
+    // small advances (532.31 + 0.79 = 533.10) get hidden.
+    const balanceRows: BalanceApiRow[] = [
+      { type: "arinvoice", docno: "AD-26-06-06927", dueamount: "5,500.00" },
+      { type: "arinvoice", docno: "EC-26-06-06920", dueamount: "440.00" },
+      { type: "arinvoice", docno: "SU-26-06-01775", dueamount: "500.00" },
+      { type: "arinvoice", docno: "WA-26-06-04910", dueamount: "1,168.32" },
+      { type: "arcreditmemo", docno: "ARCM-23-06-00045", dueamount: "28,334.78" },
+      { type: "arcreditmemo", docno: "ARCM-23-06-00047", dueamount: "158,351.12" },
+      { type: "arcreditmemo", docno: "ARCM-26-07-00180", dueamount: "-500.00" },
+      { type: "downpayment", docno: "ACR695473-2S", docdate: "05/11/2026", amount: "-533.40", dueamount: "-532.31" },
+      { type: "downpayment", docno: "ACR697392-2S", docdate: "05/19/2026", amount: "-886.00", dueamount: "-0.79" },
+    ];
+    const ledgerRows: LedgerApiRow[] = [
+      { docdate: "06/20/2026", docno: "WA-26-06-04910", doctype: "ARINVOICE", debit: "1,168.32", balance: "6,575.22" },
+    ];
+
+    const feeRows = balanceRows.filter(
+      (row) => row.type === "arinvoice" || row.type === "arcreditmemo",
+    );
+    // 7,608.32 arinvoice + (-500) negative arcm; positive 28k/158k ignored.
+    expect(sumOutstandingFees(feeRows)).toBeCloseTo(7108.32, 2);
+
+    const result = reconcileLane({
+      feeRows,
+      paymentCandidateRows: balanceRows.filter((row) => row.type === "downpayment"),
+      ledgerRows,
+      source: "ledger",
+    });
+
+    expect(result.derivedCredit).toBeCloseTo(533.1, 2);
+    expect(result.candidateSum).toBeCloseTo(533.1, 2);
+    expect(result.mode).toBe("all");
+    expect(result.displayed.map((row) => row.docno).sort()).toEqual([
+      "ACR695473-2S",
+      "ACR697392-2S",
+    ]);
+  });
+
+  it("432 dues lane — shared credit memo must not hide the floating advance", () => {
+    // UO-00432: CM-SHARED is referenced by BOTH payments, so referencedCmTotal
+    // over-counts and marks both isLedgerExhausted -> active is empty. The
+    // subset-sum fallback over all candidates must still surface ACR654326-2S
+    // (4,044.32 = derivedCredit) and keep the truly-exhausted ACR653666-2S hidden.
+    const balanceRows: BalanceApiRow[] = [
+      { type: "arinvoice", docno: "AD-26-06-06557", dueamount: "15,930.00" },
+      {
+        type: "downpayment",
+        docno: "ACR653666-2S",
+        docdate: "11/18/2025",
+        amount: "-14,000.00",
+        dueamount: "-7,000.68",
+      },
+      {
+        type: "downpayment",
+        docno: "ACR654326-2S",
+        docdate: "11/27/2025",
+        amount: "-42,000.00",
+        dueamount: "-4,044.32",
+      },
+    ];
+    const ledgerRows: LedgerApiRow[] = [
+      {
+        docdate: "11/18/2025",
+        docno: "ACR653666-2S",
+        doctype: "INCOMINGPAYMENT",
+        credit: "14,000.00",
+        refdocs: ["CM-A", "CM-SHARED"],
+      },
+      {
+        docdate: "11/27/2025",
+        docno: "ACR654326-2S",
+        doctype: "INCOMINGPAYMENT",
+        credit: "42,000.00",
+        refdocs: ["CM-SHARED", "CM-B"],
+      },
+      { docdate: "11/19/2025", docno: "CM-A", doctype: "CREDITMEMO", credit: "7,000.68" },
+      { docdate: "12/20/2025", docno: "CM-SHARED", doctype: "CREDITMEMO", credit: "14,430.00" },
+      {
+        docdate: "05/20/2026",
+        docno: "CM-B",
+        doctype: "CREDITMEMO",
+        credit: "30,000.00",
+        balance: "11,885.68",
+      },
+    ];
+
+    const result = reconcileLane({
+      feeRows: balanceRows.filter((row) => row.type === "arinvoice"),
+      paymentCandidateRows: balanceRows.filter((row) => row.type === "downpayment"),
+      ledgerRows,
+      source: "ledger",
+    });
+
+    expect(result.derivedCredit).toBeCloseTo(4044.32, 2);
+    expect(result.mode).toBe("subset");
+    expect(result.displayed.map((row) => row.docno)).toEqual(["ACR654326-2S"]);
+    expect(result.hidden.map((row) => row.docno)).toContain("ACR653666-2S");
+  });
+
   it("splitCsv handles array refdocs from API", () => {
     expect(splitCsv(["CM-23-11-09663", "CM-24-04-08400"])).toEqual([
       "CM-23-11-09663",
@@ -365,5 +469,67 @@ describe("floating-balance", () => {
 
     expect(range.dateFrom).toBe("11/01/2023");
     expect(range.dateTo).toBe("06/29/2026");
+  });
+
+  it("391 dues lane — arcreditmemo counts in fees so advance still shows", () => {
+    // UO-00391: hidden arcreditmemo (-1,000 Pet ID reversal) is baked into the
+    // ledger balance. If sumOutstandingFees ignored it, derivedCredit would be
+    // overstated by 1,000, exceed candidateSum, and fall to "aggregate_only"
+    // (hiding the 76,545 advance). Counting it nets derivedCredit == candidateSum.
+    const balanceRows: BalanceApiRow[] = [
+      { type: "arinvoice", docno: "AD-26-06-06516", dueamount: "11,812.50" },
+      { type: "arinvoice", docno: "WA-26-06-04613", dueamount: "3,021.30" },
+      { type: "arcreditmemo", docno: "ARCM-26-07-00178", dueamount: "-1,000.00" },
+      {
+        type: "downpayment",
+        docno: "ACR647020-2S",
+        docdate: "01/07/2026",
+        amount: "-153,090.00",
+        dueamount: "-76,545.00",
+        remarks: "01/2026 - 12/2026 Association Dues & Equity Contribution",
+      },
+      {
+        type: "downpayment",
+        docno: "ACR698475-2S",
+        docdate: "06/01/2026",
+        amount: "-439.00",
+        dueamount: "-0.94",
+        remarks: "Water Apr 2026 with over",
+      },
+    ];
+    const ledgerRows: LedgerApiRow[] = [
+      {
+        docdate: "07/02/2026",
+        docno: "ARCM-26-07-00178",
+        doctype: "ARCREDITMEMO",
+        credit: "1,000.00",
+        balance: "-62,712.14",
+        refdocs: "SU-26-06-01773",
+      },
+    ];
+
+    const feeRows = balanceRows.filter(
+      (row) => row.type === "arinvoice" || row.type === "arcreditmemo",
+    );
+    expect(sumOutstandingFees(feeRows)).toBeCloseTo(13833.8, 2);
+
+    const result = reconcileLane({
+      feeRows: balanceRows.filter(
+        (row) => row.type === "arinvoice" || row.type === "arcreditmemo",
+      ),
+      paymentCandidateRows: balanceRows.filter(
+        (row) => row.type === "downpayment",
+      ),
+      ledgerRows,
+      source: "ledger",
+    });
+
+    expect(result.derivedCredit).toBeCloseTo(76545.94, 2);
+    expect(result.candidateSum).toBeCloseTo(76545.94, 2);
+    expect(result.mode).toBe("all");
+    expect(result.displayed.map((row) => row.docno).sort()).toEqual([
+      "ACR647020-2S",
+      "ACR698475-2S",
+    ]);
   });
 });

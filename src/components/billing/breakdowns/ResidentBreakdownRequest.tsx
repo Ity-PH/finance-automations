@@ -8,6 +8,11 @@ import { useQueueDepth } from "@/hooks/useQueueDepth";
 import { useSlowLoadingMessage } from "@/hooks/useSlowLoadingMessage";
 import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
 import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import {
+  filterRowsByCategories,
+  type FeeCategoryId,
+} from "@/lib/utils/fee-categories";
+import { InspectedUnitLabel } from "@/components/billing/breakdowns/InspectedUnitLabel";
 import { OutstandingFees } from "@/components/billing/breakdowns/OutstandingFees";
 import { UncreditedPayments } from "@/components/billing/breakdowns/UncreditedPayments";
 import {
@@ -46,7 +51,9 @@ export function ResidentBreakdownRequest() {
   const router = useRouter();
   const { credentials, hasCredentials } = useSoaBreakdownCredentials();
   const [view, setView] = useState<BreakdownView>("fee");
-  const [selectedCodes, setSelectedCodes] = useState<Set<string>>(new Set());
+  const [selectedCategories, setSelectedCategories] = useState<
+    Set<FeeCategoryId>
+  >(new Set());
   const [selectedRowIds, setSelectedRowIds] = useState<Set<string>>(new Set());
   const [showDetails, setShowDetails] = useState(true);
 
@@ -81,9 +88,8 @@ export function ResidentBreakdownRequest() {
     const allRows = (outstandingQuery.data?.rows ?? []).filter(
       (row) => row.kind === "fee",
     );
-    if (selectedCodes.size === 0) return allRows;
-    return allRows.filter((row) => selectedCodes.has(row.resolvedCode));
-  }, [outstandingQuery.data?.rows, selectedCodes]);
+    return filterRowsByCategories(allRows, selectedCategories);
+  }, [outstandingQuery.data?.rows, selectedCategories]);
 
   const selectedSum = useMemo(() => {
     let sum = 0;
@@ -103,6 +109,23 @@ export function ResidentBreakdownRequest() {
     });
   };
 
+  const toggleSelectAll = () => {
+    const visibleIds = filteredRows.map((row) => `${row.source}-${row.docno}`);
+    const allSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => selectedRowIds.has(id));
+
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
   const handleSeePast = (kind: "fee" | "payment") => {
     router.push(`/soa-breakdown/results?kind=${kind}`);
   };
@@ -113,6 +136,7 @@ export function ResidentBreakdownRequest() {
 
   return (
     <div className="space-y-6">
+      <InspectedUnitLabel />
       <section>
         <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
           Outstanding Balance
@@ -188,8 +212,8 @@ export function ResidentBreakdownRequest() {
 
       {view === "fee" && (
         <CategoryPills
-          selectedCodes={selectedCodes}
-          onChange={setSelectedCodes}
+          selectedCategories={selectedCategories}
+          onChange={setSelectedCategories}
         />
       )}
 
@@ -201,6 +225,7 @@ export function ResidentBreakdownRequest() {
           onRetry={() => outstandingQuery.refetch()}
           selectedRowIds={selectedRowIds}
           onToggleRow={toggleRow}
+          onToggleSelectAll={toggleSelectAll}
           onSeePast={() => handleSeePast("fee")}
         />
       ) : (
