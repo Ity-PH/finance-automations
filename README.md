@@ -1,18 +1,24 @@
-# Two Serendra — Disconnection Notice Generator
+# Two Serendra — Finance Automations
 
-Internal finance tool for bulk-generating PDF disconnection notices by merging Excel data with Word templates.
+Internal finance suite for Two Serendra: bulk disconnection notices, resident balance inspection, and raw billing data lookup. Tabbed single app.
 
-## Overview
+## Tools
 
-Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.docx` letter template. The tool merges each row into the template and converts them to PDFs via [Gotenberg](https://gotenberg.dev/), then downloads everything as a single ZIP file.
+- **Generate Notices** (`/`) — Merge an `.xlsx` of unit owners with a `.docx` template into bulk PDFs via [Gotenberg](https://gotenberg.dev/), downloaded as one ZIP.
+- **Send Notices** (`/send-notices`) — Queue the generated notices for bulk email delivery (RabbitMQ + background worker).
+- **SOA Breakdown** (`/soa-breakdown`) — Inspect a resident's outstanding balance, fee split, uncredited advance payments, and ledger history, reconciled against the billing (EBT) backend.
+- **EBT Inspector** (`/ebt-inspector`) — View the raw EBT response (balance / ledger / electricity) in a table and export to Excel. Bypasses all normalization.
+
+SOA Breakdown and EBT Inspector are behind an **OTP email login gate** (allowlisted emails only).
 
 ### Key Features
 
 - **Excel Parsing** — Reads Sheet 1, extracts unit data, filters empty rows
-- **Mail Merge Support** — Automatically converts Word Mail Merge fields (`MERGEFIELD`) into template tags — no template modifications needed
-- **Live Preview** — Select any unit to verify the data mapping before generating
+- **Mail Merge Support** — Auto-converts Word Mail Merge fields (`MERGEFIELD`) into template tags — no template edits needed
+- **Live Preview** — Verify data mapping for any unit before generating
 - **Bulk PDF Generation** — Converts all notices in one click with a progress indicator
-- **Zero Persistence** — Everything runs in-memory; no files saved to disk, no database
+- **Floating-credit reconciliation** — Derives true unapplied advance from the ledger instead of trusting stale EBT downpayment balances
+- **Zero Persistence** — Runs in-memory; no files saved to disk, no database
 
 ## Tech Stack
 
@@ -20,10 +26,15 @@ Upload an `.xlsx` spreadsheet of unit owners with outstanding balances and a `.d
 |-------|-----------|
 | Framework | Next.js 15 (App Router) |
 | Styling | Tailwind CSS v4 |
-| Excel Parsing | SheetJS (`xlsx`) |
+| Data fetching | TanStack Query (`@tanstack/react-query`) |
+| Validation | `zod` |
+| Auth | OTP email login; `jose` (JWT sessions) + `bcryptjs` |
+| Excel Parsing / Export | SheetJS (`xlsx`) |
 | Word Templating | `docxtemplater` + `pizzip` |
 | PDF Conversion | Gotenberg (Cloud Deployed) |
 | Zipping | `jszip` + `file-saver` |
+| Email | `nodemailer` (SMTP OTP + notice delivery) |
+| Queue | RabbitMQ (`amqplib`) + background worker |
 
 ## Prerequisites
 
@@ -47,7 +58,15 @@ npm run dev
 
 The app runs on **http://localhost:3001**.
 
-## Usage
+### 3. Start the email worker (optional — only for Send Notices)
+
+```bash
+npm run worker
+```
+
+Consumes the RabbitMQ queue and sends bulk notice emails.
+
+## Usage — Generate Notices
 
 1. **Upload Excel** — Drag or click to upload the `.xlsx` file containing unit owner data
 2. **Upload Template** — Drag or click to upload the `.docx` letter template
@@ -95,21 +114,44 @@ The tool auto-converts these to curly-brace tags at processing time. No manual e
 ```
 src/
 ├── app/
-│   ├── api/convert/route.ts   # Gotenberg proxy (docx → pdf)
-│   ├── globals.css
-│   ├── layout.tsx
-│   └── page.tsx               # Main UI (uploads, preview, generation)
-├── components/
-│   └── Dropzone.tsx           # Reusable file upload dropzone
+│   ├── api/
+│   │   ├── convert/           # Gotenberg proxy (docx → pdf)
+│   │   ├── auth/              # OTP login / verify / logout
+│   │   ├── queue-email/       # enqueue bulk notice emails
+│   │   ├── send-notices/      # send-notices endpoint
+│   │   ├── soa-breakdown/     # outstanding, ledger, queue
+│   │   └── ebt-inspector/     # raw EBT proxy
+│   ├── page.tsx               # Generate Notices UI
+│   ├── send-notices/          # Send Notices UI
+│   ├── soa-breakdown/         # SOA Breakdown UI (+ results)
+│   ├── ebt-inspector/         # EBT Inspector UI
+│   ├── login/                 # OTP login page
+│   └── server/                # repositories + services (billing/EBT)
+├── components/                # Dropzone, TabNav, billing breakdown UI
+├── middleware.ts             # session gate for soa-breakdown + ebt-inspector
 └── lib/
     ├── parseExcel.ts          # xlsx → typed JSON rows
     ├── preprocessDocx.ts      # Mail Merge XML → {Tag} converter
-    └── renderDocx.ts          # docxtemplater rendering pipeline
+    ├── renderDocx.ts          # docxtemplater rendering pipeline
+    ├── auth/                  # session tokens
+    ├── billing/               # floating-credit reconciliation
+    └── schema/                # zod schemas
+worker/                        # RabbitMQ email worker
 ```
 
 ## Environment Variables
 
-Ensure you have `GOTENBERG_URL`, `SERVICE_USER`, and `SERVICE_PASSWORD` in your environment variables to let the .docx to PDF conversion work smoothly.
+See `.env.example` for the full list. Grouped by concern:
+
+| Group | Variables |
+|-------|-----------|
+| Auth (OTP gate) | `AUTH_CHALLENGE_SECRET`, `AUTH_SESSION_SECRET`, `OTP_ALLOWLIST` |
+| SMTP (OTP delivery) | `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` |
+| Email (Gmail OAuth2, notices) | `EMAIL_USER`, `EMAIL_CLIENT_ID`, `EMAIL_CLIENT_SECRET`, `EMAIL_REFRESH_TOKEN` |
+| Gotenberg (docx → pdf) | `GOTENBERG_URL`, `SERVICE_USER_GOTENBERG`, `SERVICE_PASSWORD_GOTENBERG` |
+| Queue | `RABBITMQ_URL` |
+| Billing (EBT) backend | `RESIDENT_BREAKDOWN_BASE_URL`, `RESIDENT_BREAKDOWN_API_KEY` |
+| Rate limiting | `TRUSTED_PROXY_HOPS` (default 1) |
 
 ## License
 
