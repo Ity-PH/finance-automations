@@ -349,6 +349,67 @@ describe("floating-balance", () => {
     expect(result.displayed).toHaveLength(0);
   });
 
+  it("432 dues lane — shared credit memo must not hide the floating advance", () => {
+    // UO-00432: CM-SHARED is referenced by BOTH payments, so referencedCmTotal
+    // over-counts and marks both isLedgerExhausted -> active is empty. The
+    // subset-sum fallback over all candidates must still surface ACR654326-2S
+    // (4,044.32 = derivedCredit) and keep the truly-exhausted ACR653666-2S hidden.
+    const balanceRows: BalanceApiRow[] = [
+      { type: "arinvoice", docno: "AD-26-06-06557", dueamount: "15,930.00" },
+      {
+        type: "downpayment",
+        docno: "ACR653666-2S",
+        docdate: "11/18/2025",
+        amount: "-14,000.00",
+        dueamount: "-7,000.68",
+      },
+      {
+        type: "downpayment",
+        docno: "ACR654326-2S",
+        docdate: "11/27/2025",
+        amount: "-42,000.00",
+        dueamount: "-4,044.32",
+      },
+    ];
+    const ledgerRows: LedgerApiRow[] = [
+      {
+        docdate: "11/18/2025",
+        docno: "ACR653666-2S",
+        doctype: "INCOMINGPAYMENT",
+        credit: "14,000.00",
+        refdocs: ["CM-A", "CM-SHARED"],
+      },
+      {
+        docdate: "11/27/2025",
+        docno: "ACR654326-2S",
+        doctype: "INCOMINGPAYMENT",
+        credit: "42,000.00",
+        refdocs: ["CM-SHARED", "CM-B"],
+      },
+      { docdate: "11/19/2025", docno: "CM-A", doctype: "CREDITMEMO", credit: "7,000.68" },
+      { docdate: "12/20/2025", docno: "CM-SHARED", doctype: "CREDITMEMO", credit: "14,430.00" },
+      {
+        docdate: "05/20/2026",
+        docno: "CM-B",
+        doctype: "CREDITMEMO",
+        credit: "30,000.00",
+        balance: "11,885.68",
+      },
+    ];
+
+    const result = reconcileLane({
+      feeRows: balanceRows.filter((row) => row.type === "arinvoice"),
+      paymentCandidateRows: balanceRows.filter((row) => row.type === "downpayment"),
+      ledgerRows,
+      source: "ledger",
+    });
+
+    expect(result.derivedCredit).toBeCloseTo(4044.32, 2);
+    expect(result.mode).toBe("subset");
+    expect(result.displayed.map((row) => row.docno)).toEqual(["ACR654326-2S"]);
+    expect(result.hidden.map((row) => row.docno)).toContain("ACR653666-2S");
+  });
+
   it("splitCsv handles array refdocs from API", () => {
     expect(splitCsv(["CM-23-11-09663", "CM-24-04-08400"])).toEqual([
       "CM-23-11-09663",

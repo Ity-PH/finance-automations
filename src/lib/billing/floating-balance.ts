@@ -318,8 +318,17 @@ export function reconcileDownpaymentCandidates(
     return { displayed: greedyRemaining, hidden, mode: "subset" };
   }
 
-  if (active.length <= 12) {
-    return { displayed: [], hidden: candidates, mode: "aggregate_only" };
+  // Fallback: isLedgerExhausted over-counts a credit memo that is shared by
+  // several payments (its full credit is attributed to each), which can falsely
+  // flag a still-floating payment as exhausted and empty `active`. Before giving
+  // up, subset-sum over ALL candidates against the trusted derivedCredit.
+  if (candidates.length <= 12) {
+    const fullSubset = subsetSum(candidates, derivedTotalCredit, tolerance);
+    if (fullSubset && fullSubset.length > 0) {
+      const displayedDocnos = new Set(fullSubset.map((row) => row.docno));
+      const hidden = candidates.filter((row) => !displayedDocnos.has(row.docno));
+      return { displayed: fullSubset, hidden, mode: "subset" };
+    }
   }
 
   return { displayed: [], hidden: candidates, mode: "aggregate_only" };
