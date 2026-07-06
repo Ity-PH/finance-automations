@@ -11,6 +11,7 @@ import {
   type ReconcileLaneResult,
 } from "@/lib/billing/floating-balance";
 import { codeFromDocNo, resolveInterestCode } from "@/lib/utils/code-utils";
+import { isAdjustmentArinvoiceRemarks } from "@/lib/utils/balance-row-utils";
 import { parseApiDate } from "@/lib/utils/breakdown-date-utils";
 import {
   formatCurrency,
@@ -163,8 +164,12 @@ class ResidentBreakdownService {
         );
 
         const normalizedRows = [
-          ...this.normalizeBalanceRows(balanceRows, null, null),
-          ...this.normalizeElectricityRows(electricityRows, null, null),
+          ...this.normalizeBalanceRows(balanceRows, null, null, {
+            excludeAdjustmentFees: true,
+          }),
+          ...this.normalizeElectricityRows(electricityRows, null, null, {
+            excludeAdjustmentFees: true,
+          }),
           ...toUncreditedPaymentRows(duesReconciliation.displayed),
           ...toUncreditedPaymentRows(electricityReconciliation.displayed),
         ];
@@ -352,11 +357,23 @@ class ResidentBreakdownService {
     rows: BalanceApiRow[],
     start: Date | null,
     end: Date | null,
+    options?: { excludeAdjustmentFees?: boolean },
   ): ResidentBreakdownRow[] {
     return rows
-      .filter(
-        (row) => this.isArinvoice(row) && this.isInDateRange(row, start, end),
-      )
+      .filter((row) => {
+        if (!this.isArinvoice(row) || !this.isInDateRange(row, start, end)) {
+          return false;
+        }
+
+        if (
+          options?.excludeAdjustmentFees &&
+          isAdjustmentArinvoiceRemarks(row.remarks ?? "")
+        ) {
+          return false;
+        }
+
+        return true;
+      })
       .map((row) => {
         const selectedAmount = row.dueamount || row.amount || "0";
         const amount = parseMoney(selectedAmount);
@@ -383,11 +400,23 @@ class ResidentBreakdownService {
     rows: ElectricityApiRow[],
     start: Date | null,
     end: Date | null,
+    options?: { excludeAdjustmentFees?: boolean },
   ): ResidentBreakdownRow[] {
     return rows
-      .filter(
-        (row) => this.isArinvoice(row) && this.isInDateRange(row, start, end),
-      )
+      .filter((row) => {
+        if (!this.isArinvoice(row) || !this.isInDateRange(row, start, end)) {
+          return false;
+        }
+
+        if (
+          options?.excludeAdjustmentFees &&
+          isAdjustmentArinvoiceRemarks(row.remarks ?? "")
+        ) {
+          return false;
+        }
+
+        return true;
+      })
       .map((row) => {
         const selectedAmount = row.dueamount || row.amount || "0";
         const amount = parseMoney(selectedAmount);

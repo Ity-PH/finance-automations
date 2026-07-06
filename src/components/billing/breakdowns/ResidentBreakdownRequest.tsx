@@ -109,6 +109,23 @@ export function ResidentBreakdownRequest() {
     });
   };
 
+  const toggleSelectAll = () => {
+    const visibleIds = filteredRows.map((row) => `${row.source}-${row.docno}`);
+    const allSelected =
+      visibleIds.length > 0 &&
+      visibleIds.every((id) => selectedRowIds.has(id));
+
+    setSelectedRowIds((prev) => {
+      const next = new Set(prev);
+      if (allSelected) {
+        visibleIds.forEach((id) => next.delete(id));
+      } else {
+        visibleIds.forEach((id) => next.add(id));
+      }
+      return next;
+    });
+  };
+
   const handleSeePast = (kind: "fee" | "payment") => {
     router.push(`/soa-breakdown/results?kind=${kind}`);
   };
@@ -208,6 +225,7 @@ export function ResidentBreakdownRequest() {
           onRetry={() => outstandingQuery.refetch()}
           selectedRowIds={selectedRowIds}
           onToggleRow={toggleRow}
+          onToggleSelectAll={toggleSelectAll}
           onSeePast={() => handleSeePast("fee")}
         />
       ) : (
