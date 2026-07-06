@@ -8,6 +8,7 @@ import { useQueueDepth } from "@/hooks/useQueueDepth";
 import { useSlowLoadingMessage } from "@/hooks/useSlowLoadingMessage";
 import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
 import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import { InspectedUnitLabel } from "@/components/billing/breakdowns/InspectedUnitLabel";
 import { OutstandingFees } from "@/components/billing/breakdowns/OutstandingFees";
 import { UncreditedPayments } from "@/components/billing/breakdowns/UncreditedPayments";
 import {
@@ -113,6 +114,7 @@ export function ResidentBreakdownRequest() {
 
   return (
     <div className="space-y-6">
+      <InspectedUnitLabel />
       <section>
         <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
           Outstanding Balance

@@ -5,6 +5,7 @@ import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import { InspectedUnitLabel } from "@/components/billing/breakdowns/InspectedUnitLabel";
 import { PastFees } from "@/components/billing/breakdowns/PastFees";
 import { PastPayments } from "@/components/billing/breakdowns/PastPayments";
 import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
@@ -165,6 +166,7 @@ export function ResidentBreakdownResults() {
 
   return (
     <div className="space-y-6">
+      <InspectedUnitLabel />
       <div className="flex items-start justify-between gap-4">
         <div>
           <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
