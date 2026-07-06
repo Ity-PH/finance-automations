@@ -965,3 +965,197 @@ npm run test:run -- src/lib/billing/floating-balance.test.ts
 4. **`derivedCredit` is the source of truth**, not the downpayment `dueamount` (which can be stale). Both fixes lean on that: net the fees correctly, then subset-sum to the trusted credit.
 5. **Do not tighten the float tolerance.** See the non-issue note above.
 6. **EBT Inspector must bypass normalization.** Its whole value is showing the *raw* EBT rows. Call the repository directly, not the normalizing service.
+
+---
+---
+
+# OPEN BUG (not yet fixed): unallocatable floating credit shows nothing
+
+**Status:** unresolved — needs a finance-team decision before coding. Documented Jul 6, 2026 for discussion. This is **not** the same as Changes 6 and 7 (those had a clean answer once inputs were corrected; this one has no clean per-row answer at all).
+
+**One-line symptom:** a unit that genuinely holds unapplied advance credit shows **"No uncredited payments"** because the credit cannot be matched to any subset of the EBT's downpayment rows.
+
+## The reference unit: UO-00934 LR
+
+### What the app shows
+
+- Outstanding Balance: **(₱4,081.77)** — i.e. the account is **in credit** (Dues & Others −4,081.77; Electricity 0.00).
+- Payments tab → **Uncredited Payments: "No uncredited payments."** ← the bug. The advance is real and should be listed.
+
+### Raw EBT balance table
+
+| type | docno | dueamount | remarks |
+|------|-------|-----------|---------|
+| arinvoice | OT-24-04-00009 | 939.37 | Adjustment to ACR0564114 |
+| downpayment | ACR0534441 | −3,217.60 | Water Advance Payment (O) |
+| downpayment | ACR0544409 | −3,899.00 | Water advance Payment (O) |
+| downpayment | ACR0621965 | −2,134.42 | Water Advance payment (O) |
+| downpayment | ACR654632-2S | −200.00 | water adv payment |
+| downpayment | ACR573509-F | −699.90 | 12/2025 Association Dues - 12/2025 Equity Contribution - PDC |
+
+Downpayment "remaining" per EBT sums to **₱10,150.92**.
+
+### Reconciliation inputs (dues lane)
+
+```
+sumOutstandingFees = 939.37            // the one open arinvoice (the adjustment)
+ledgerFinalBalance = -4,081.77         // account is in credit
+derivedCredit      = max(0, 939.37 - (-4,081.77)) = 5,021.14   // TRUSTED floating credit
+candidateSum       = 10,150.92         // EBT downpayment remainings (STALE, overstated)
+```
+
+`candidateSum (10,150.92) > derivedCredit (5,021.14)` → reconcile enters the subset/exhausted branch, finds no matching subset, and returns `mode: "aggregate_only"` → **displays nothing**.
+
+## Finding 1 — the open "fee" is a payment reversal, not a charge
+
+`OT-24-04-00009` ("Adjustment to ACR0564114") reverses a real payment:
+
+- 03/05/2024 — `ACR0564114` INCOMINGPAYMENT **credit ₱939.37** (payment received).
+- 04/01/2024 — `OT-24-04-00009` ARINVOICE **debit ₱939.37** ("Adjustment to ACR0564114").
+
+Net effect zero; the 939.37 payment was clawed back (bounced / misapplied / wrong unit). No `refdocs`, never re-settled — so it lingers as an open item. Change 4 correctly hides it from the fee **display** (remarks match `/\badjustments?\b/i`), but `sumOutstandingFees` still counts it.
+
+## Finding 2 — ignoring the adjustment does NOT change the answer
+
+The adjustment is a wash; removing it consistently leaves `derivedCredit` identical:
+
+| Treatment | open fees | ledger balance | derivedCredit |
+|---|---|---|---|
+| Keep adjustment | 939.37 | −4,081.77 | **5,021.14** |
+| Remove it from **both** sides | 0 | −5,021.14 | **5,021.14** |
+
+The −4,081.77 balance already includes the +939.37 debit, so you cannot drop it from fees only (that double-counts). Done consistently, `derivedCredit` stays **5,021.14**. **The adjustment is a red herring for the amount — it is not why nothing shows.**
+
+## Finding 3 — the real blocker: EBT downpayment remainings are stale and unreconcilable
+
+- EBT claims **10,150.92** remaining across the 5 downpayments.
+- Ledger-true floating credit is **5,021.14** gross (or **4,081.77** net — the displayed credit balance).
+- EBT overstates by ~**5,130**.
+- **No subset** of `{3,217.60, 3,899.00, 2,134.42, 200.00, 699.90}` sums to 5,021.14 (brute-forced; closest 4,798.90) **or** to 4,081.77 (closest 4,099.00).
+
+So even a perfect subset algorithm cannot reconcile — the inputs themselves are wrong.
+
+## Finding 4 — per-row true remaining cannot be reconstructed from the ledger
+
+Attempted to recompute each downpayment's real remaining by allocating credit-memo shares. The ledger does not attribute cleanly:
+
+- Credit memos are **shared** across multiple payments (same defect family as Change 7).
+- Some CMs have a blank `refno`; some rows appear duplicated.
+- Both "full attribution" and "even split" produce nonsense (negative remainings):
+
+| downpayment | paid | CM full | rem (full) | rem (split) |
+|---|---|---|---|---|
+| ACR0534441 | 4,000.00 | 10,133.57 | −6,133.57 | −1,894.11 |
+| ACR0544409 | 4,000.00 | 8,543.73 | −4,543.73 | −1,697.64 |
+| ACR0621965 | 2,134.42 | 4,808.78 | −2,674.36 | −269.97 |
+| ACR654632-2S | 200.00 | 0.00 | 200.00 | 200.00 |
+| ACR573509-F | 16,437.50 | 16,437.50 | 0.00 | 8,218.75 |
+
+**Conclusion:** which specific advance holds the ₱5,021.14 cannot be determined from this data. Only the **aggregate** is trustworthy.
+
+## Why this is different from Changes 6 and 7
+
+- **Change 6** (arcreditmemo) and **Change 7** (shared-CM false-exhaustion) both had a *correct, itemizable* answer once the reconciliation inputs were fixed — a specific downpayment (or subset) legitimately matched `derivedCredit`.
+- **This bug** has **no** itemizable answer. `derivedCredit` is known and correct, but no subset of the (stale) downpayment rows reproduces it, and the ledger cannot be used to derive per-row truth. The reconciler's "if I can't itemize precisely, show nothing" policy then hides real credit.
+
+This is a **design limitation of `aggregate_only` mode**, exposed whenever EBT's downpayment tracking drifts far from the ledger. Changes 6/7 narrowed how often we land in `aggregate_only`; they did not change what `aggregate_only` *displays* (still nothing).
+
+## Potential solutions (for finance discussion)
+
+Ordered by current preference. All only affect the `aggregate_only` case; `"all"` and `"subset"` behavior is unchanged.
+
+1. **Aggregate synthetic row (recommended).** When `mode === "aggregate_only"` and `derivedCredit > 0`, display one line — e.g. "Unapplied advance (unallocated)" — for the aggregate amount, with no specific `docno`.
+   - **Amount decision (needs finance):** show **net ₱4,081.77** (reconciles with the headline credit balance the resident already sees; the hidden 939.37 reversal is netted out) **or gross ₱5,021.14** (total advance before offsetting the hidden reversal). Recommendation: **net**, for headline consistency.
+   - **Pros:** always surfaces the real credit; no fabricated per-payment split; matches the mode's own name.
+   - **Cons:** not itemized (can't point to a specific ACR); needs a UI row that tolerates a missing docno.
+
+2. **Greedy itemize with a partial last row.** Show newest/closest downpayments accumulating up to `derivedCredit`, trimming the final row partially.
+   - **Pros:** looks itemized.
+   - **Cons:** the per-row amounts are *invented* (don't match EBT), and picking "which rows" is arbitrary given the data — risk of misleading finance into thinking a specific ACR is/ isn't consumed.
+
+3. **Trust EBT downpayment `dueamount` as-is.** Abandon the reconcile-hiding; list all downpayment rows at their EBT remaining (sum 10,150.92).
+   - **Pros:** dead simple; matches what finance sees in SAP's payment screen.
+   - **Cons:** **overstates** by ~5,130 here; re-introduces exactly the stale-credit display the reconciler was built to suppress. Would regress other units.
+
+4. **Leave as-is (status quo).** Keep showing "No uncredited payments" when unallocatable.
+   - **Pros:** no risk of showing a wrong itemization.
+   - **Cons:** hides real credit; this is the reported complaint.
+
+## Open questions for the finance team
+
+1. When an advance cannot be tied to a specific charge, do they want to see the **aggregate unapplied credit**, or is "no uncredited payments" acceptable in that case?
+2. For the aggregate, which figure is the "right" one operationally: **net (4,081.77, matches the credit balance)** or **gross (5,021.14, total advance)**?
+3. **Root-data question:** why does EBT still report ₱10,150.92 of downpayment remaining when the ledger shows only ~5,021 in credit? Are the old 2023 water advances (`ACR0534441`, `ACR0544409`) genuinely still open, or is EBT's downpayment tracking stale? If EBT can be corrected at source, this bug largely disappears.
+4. Is the reversed payment `ACR0564114` / `OT-24-04-00009` a real ₱939.37 the resident still owes, or leftover noise that should be written off? This decides net vs gross.
+
+## Reproduction
+
+```
+EBT Inspector → UO-00934 / LR → Balance        (see the 1 arinvoice + 5 downpayments)
+EBT Inspector → UO-00934 / LR → Ledger         (trace OT-24-04-00009, ACR0564114, and each ACR)
+SOA Breakdown → UO-00934 / LR → Payments tab   (observe "No uncredited payments")
+```
+
+---
+
+## Simplified Explanation
+
+This is the same bug as above, written in plain accounting terms — no code, no jargon. It has two parts: first, how the tool figures out a resident's advance payments today; then, what exactly goes wrong for unit UO-00934.
+
+### Part A — How the tool currently reconciles advance payments
+
+Think of each advance payment (a "down payment" / "ACR") like a **prepaid deposit jar**. A resident hands over money ahead of time, and each month the association takes that month's dues and equity out of the jar until it runs dry.
+
+The EBT keeps a list of these jars and, next to each one, a number saying *"this much is still left in the jar."*
+
+**The catch:** that EBT "still left" number is often wrong — it is frequently **too high**. The EBT sometimes keeps showing money in a jar that was actually already spent months ago. If the tool simply trusted those numbers, it would tell residents they have far more advance credit than they really do.
+
+**So the tool does not trust the jar labels. It cross-checks against the statement of account (the ledger).** In plain terms:
+
+1. Add up everything the resident still genuinely **owes** today (the open charges).
+2. Look at the account's real running balance at the bottom of the ledger — this already reflects every payment and every charge that has actually been posted.
+3. The difference between those two tells the tool the **true total of advance money that is still sitting unused**, regardless of what the jar labels claim.
+4. Finally, the tool tries to point that true leftover amount back at specific jars, so it can show the resident "your remaining advance is this jar and that jar."
+
+**A clean example (how it's supposed to work):**
+
+- EBT lists two jars: Jar A "₱5,000 left", Jar B "₱3,000 left" → labels say ₱8,000 total.
+- But the statement of account proves the resident only has **₱3,000** of advance money truly unused.
+- The tool concludes Jar A was actually already spent, shows **only Jar B (₱3,000)**, and hides Jar A. Correct result — the resident's real advance is ₱3,000, and it matches Jar B exactly.
+
+That "matching back to a specific jar" step is the important one. It only works when the true leftover amount lines up with one jar, or with a clean combination of jars.
+
+### Part B — What goes wrong for UO-00934
+
+This resident is actually **in credit** — the tool's headline correctly shows an advance balance of **₱4,081.77** in their favor. So there is real advance money here. Yet the Payments tab says **"No uncredited payments,"** which is wrong and confusing.
+
+Here is why, step by step:
+
+**1. The EBT jar labels are badly overstated.** The EBT lists five advance-payment jars and claims they still hold **₱10,150.92** in total. But the statement of account proves only about **₱5,021** of advance money is genuinely unused (and after one offset, the net figure is the ₱4,081.77 shown in the headline). So the EBT is overstating the leftover advances by roughly **₱5,130**.
+
+**2. The true leftover doesn't line up with any of the jars.** The real unused advance (~₱5,021) does not equal any single jar, and it does not equal any clean combination of the five jars either. The amounts simply don't add up to it. The individual jars are:
+
+| Jar (advance payment) | EBT says still left |
+|---|---|
+| ACR0534441 (Water advance, 2023) | 3,217.60 |
+| ACR0544409 (Water advance, 2023) | 3,899.00 |
+| ACR0621965 (Water advance, 2025) | 2,134.42 |
+| ACR654632-2S (Water advance) | 200.00 |
+| ACR573509-F (Dues/Equity, PDC) | 699.90 |
+| **EBT total** | **10,150.92** |
+| **Statement of account says truly unused** | **~5,021.14** |
+
+No mix of those five figures adds up to ₱5,021.14. So the tool knows the *total* real advance, but it cannot say *which* jar (or jars) that money belongs to.
+
+**3. When the tool can't point to a specific jar, it currently shows nothing.** Because it can't confidently attach the ₱5,021 to a named jar, it plays it safe and displays "No uncredited payments." That safe choice is what hides the real advance and creates the complaint.
+
+**4. Why the numbers can't be traced to a jar.** Normally we could re-derive each jar's real leftover from the statement. Here we can't, because the association's own records apply one credit memo against **several** jars at once, some records are missing their reference, and a few appear twice. When we try to work out how much each jar truly has left, the math comes out impossible (some jars would have *negative* money left). The bookkeeping is too tangled to split cleanly per jar.
+
+**5. Side note — the one "charge" showing is not a real charge.** The single ₱939.37 open item labeled "Adjustment to ACR0564114" is actually a **reversed payment**: a ₱939.37 payment came in on 03/05/2024 and was taken back on 04/01/2024. It nets to zero and is not a new fee. It does **not** cause this bug — the missing-advance problem is exactly the same with or without it. It only matters for deciding the final displayed figure (see the question below).
+
+### What we need from finance
+
+1. When we can prove a resident has advance money but **cannot tie it to a specific advance payment**, do you want the tool to show the **total unused advance as one summary line**, or is "No uncredited payments" acceptable in that situation?
+2. If we show a summary line, which figure is correct for your purposes — the **net ₱4,081.77** (matches the credit balance already on the headline) or the **gross ₱5,021.14** (total advance before offsetting the reversed payment)?
+3. Most important, root cause: **why does the EBT still show ₱10,150.92 of advances remaining when the account only truly has about ₱5,021 unused?** Are those old 2023 water advances really still open, or is the EBT simply not clearing them once they're spent? If the EBT records can be corrected at the source, this problem mostly goes away on its own.
+4. Is that reversed ₱939.37 (ACR0564114) still genuinely collectible from the resident, or should it be written off? Your answer decides the net-vs-gross figure above.
