@@ -69,15 +69,18 @@ class ResidentBreakdownService {
           ledger: ledgerRows,
         } = outstandingData;
 
-        const duesFeeRows = balanceRows.filter(
-          (row) => (row.type ?? "").toLowerCase() === "arinvoice",
-        );
+        // arcreditmemo (negative) nets against fees in sumOutstandingFees so
+        // derivedCredit stays correct. It is NOT displayed (normalizeBalanceRows
+        // shows arinvoice only); it only feeds the reconciliation math here.
+        const isFeeRow = (row: { type?: string }) => {
+          const type = (row.type ?? "").toLowerCase();
+          return type === "arinvoice" || type === "arcreditmemo";
+        };
+        const duesFeeRows = balanceRows.filter(isFeeRow);
         const duesPaymentRows = balanceRows.filter(
           (row) => (row.type ?? "").toLowerCase() === "downpayment",
         );
-        const electricityFeeRows = electricityRows.filter(
-          (row) => (row.type ?? "").toLowerCase() === "arinvoice",
-        );
+        const electricityFeeRows = electricityRows.filter(isFeeRow);
         const electricityPaymentRows = electricityRows.filter(
           (row) => (row.type ?? "").toLowerCase() === "downpayment",
         );

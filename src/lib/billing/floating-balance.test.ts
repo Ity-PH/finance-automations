@@ -366,4 +366,66 @@ describe("floating-balance", () => {
     expect(range.dateFrom).toBe("11/01/2023");
     expect(range.dateTo).toBe("06/29/2026");
   });
+
+  it("391 dues lane — arcreditmemo counts in fees so advance still shows", () => {
+    // UO-00391: hidden arcreditmemo (-1,000 Pet ID reversal) is baked into the
+    // ledger balance. If sumOutstandingFees ignored it, derivedCredit would be
+    // overstated by 1,000, exceed candidateSum, and fall to "aggregate_only"
+    // (hiding the 76,545 advance). Counting it nets derivedCredit == candidateSum.
+    const balanceRows: BalanceApiRow[] = [
+      { type: "arinvoice", docno: "AD-26-06-06516", dueamount: "11,812.50" },
+      { type: "arinvoice", docno: "WA-26-06-04613", dueamount: "3,021.30" },
+      { type: "arcreditmemo", docno: "ARCM-26-07-00178", dueamount: "-1,000.00" },
+      {
+        type: "downpayment",
+        docno: "ACR647020-2S",
+        docdate: "01/07/2026",
+        amount: "-153,090.00",
+        dueamount: "-76,545.00",
+        remarks: "01/2026 - 12/2026 Association Dues & Equity Contribution",
+      },
+      {
+        type: "downpayment",
+        docno: "ACR698475-2S",
+        docdate: "06/01/2026",
+        amount: "-439.00",
+        dueamount: "-0.94",
+        remarks: "Water Apr 2026 with over",
+      },
+    ];
+    const ledgerRows: LedgerApiRow[] = [
+      {
+        docdate: "07/02/2026",
+        docno: "ARCM-26-07-00178",
+        doctype: "ARCREDITMEMO",
+        credit: "1,000.00",
+        balance: "-62,712.14",
+        refdocs: "SU-26-06-01773",
+      },
+    ];
+
+    const feeRows = balanceRows.filter(
+      (row) => row.type === "arinvoice" || row.type === "arcreditmemo",
+    );
+    expect(sumOutstandingFees(feeRows)).toBeCloseTo(13833.8, 2);
+
+    const result = reconcileLane({
+      feeRows: balanceRows.filter(
+        (row) => row.type === "arinvoice" || row.type === "arcreditmemo",
+      ),
+      paymentCandidateRows: balanceRows.filter(
+        (row) => row.type === "downpayment",
+      ),
+      ledgerRows,
+      source: "ledger",
+    });
+
+    expect(result.derivedCredit).toBeCloseTo(76545.94, 2);
+    expect(result.candidateSum).toBeCloseTo(76545.94, 2);
+    expect(result.mode).toBe("all");
+    expect(result.displayed.map((row) => row.docno).sort()).toEqual([
+      "ACR647020-2S",
+      "ACR698475-2S",
+    ]);
+  });
 });

@@ -52,6 +52,10 @@ function isDownpayment(row: { type?: string }): boolean {
   return (row.type ?? "").toLowerCase() === "downpayment";
 }
 
+function isArcreditmemo(row: { type?: string }): boolean {
+  return (row.type ?? "").toLowerCase() === "arcreditmemo";
+}
+
 function normalizeText(value: unknown): string {
   if (value === null || value === undefined) return "";
   return String(value).trim();
@@ -74,8 +78,12 @@ export function splitCsv(value: string | string[] | undefined | null): string[] 
 }
 
 export function sumOutstandingFees(rows: BalanceLikeRow[]): number {
+  // arcreditmemo carries a negative dueamount and reduces net fees. It is
+  // hidden from the resident's fee list (normalizeBalanceRows shows arinvoice
+  // only) but MUST count here, else derivedCredit is overstated by its amount
+  // and reconcileDownpaymentCandidates wrongly falls to "aggregate_only".
   return rows
-    .filter(isArinvoice)
+    .filter((row) => isArinvoice(row) || isArcreditmemo(row))
     .reduce((sum, row) => sum + parseMoney(row.dueamount), 0);
 }
 
