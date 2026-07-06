@@ -349,6 +349,49 @@ describe("floating-balance", () => {
     expect(result.displayed).toHaveLength(0);
   });
 
+  it("803 dues lane — positive arcreditmemo artifacts must NOT inflate fees", () => {
+    // UO-00803: stale 2023 A/R credit memos appear on the balance table with
+    // large POSITIVE dueamounts but are not in the ledger balance. Only the
+    // negative (-500 Pet-ID reversal) arcreditmemo nets against fees; the
+    // positive ones must be ignored, else derivedCredit explodes and the two
+    // small advances (532.31 + 0.79 = 533.10) get hidden.
+    const balanceRows: BalanceApiRow[] = [
+      { type: "arinvoice", docno: "AD-26-06-06927", dueamount: "5,500.00" },
+      { type: "arinvoice", docno: "EC-26-06-06920", dueamount: "440.00" },
+      { type: "arinvoice", docno: "SU-26-06-01775", dueamount: "500.00" },
+      { type: "arinvoice", docno: "WA-26-06-04910", dueamount: "1,168.32" },
+      { type: "arcreditmemo", docno: "ARCM-23-06-00045", dueamount: "28,334.78" },
+      { type: "arcreditmemo", docno: "ARCM-23-06-00047", dueamount: "158,351.12" },
+      { type: "arcreditmemo", docno: "ARCM-26-07-00180", dueamount: "-500.00" },
+      { type: "downpayment", docno: "ACR695473-2S", docdate: "05/11/2026", amount: "-533.40", dueamount: "-532.31" },
+      { type: "downpayment", docno: "ACR697392-2S", docdate: "05/19/2026", amount: "-886.00", dueamount: "-0.79" },
+    ];
+    const ledgerRows: LedgerApiRow[] = [
+      { docdate: "06/20/2026", docno: "WA-26-06-04910", doctype: "ARINVOICE", debit: "1,168.32", balance: "6,575.22" },
+    ];
+
+    const feeRows = balanceRows.filter(
+      (row) => row.type === "arinvoice" || row.type === "arcreditmemo",
+    );
+    // 7,608.32 arinvoice + (-500) negative arcm; positive 28k/158k ignored.
+    expect(sumOutstandingFees(feeRows)).toBeCloseTo(7108.32, 2);
+
+    const result = reconcileLane({
+      feeRows,
+      paymentCandidateRows: balanceRows.filter((row) => row.type === "downpayment"),
+      ledgerRows,
+      source: "ledger",
+    });
+
+    expect(result.derivedCredit).toBeCloseTo(533.1, 2);
+    expect(result.candidateSum).toBeCloseTo(533.1, 2);
+    expect(result.mode).toBe("all");
+    expect(result.displayed.map((row) => row.docno).sort()).toEqual([
+      "ACR695473-2S",
+      "ACR697392-2S",
+    ]);
+  });
+
   it("432 dues lane — shared credit memo must not hide the floating advance", () => {
     // UO-00432: CM-SHARED is referenced by BOTH payments, so referencedCmTotal
     // over-counts and marks both isLedgerExhausted -> active is empty. The

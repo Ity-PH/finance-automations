@@ -694,15 +694,25 @@ function isArcreditmemo(row: { type?: string }): boolean {
 }
 
 export function sumOutstandingFees(rows: BalanceLikeRow[]): number {
-  // arcreditmemo carries a negative dueamount and reduces net fees. It is hidden
-  // from the resident's fee list (normalizeBalanceRows shows arinvoice only) but
-  // MUST count here, else derivedCredit is overstated by its amount and
-  // reconcileDownpaymentCandidates wrongly falls to "aggregate_only".
-  return rows
-    .filter((row) => isArinvoice(row) || isArcreditmemo(row))
-    .reduce((sum, row) => sum + parseMoney(row.dueamount), 0);
+  return rows.reduce((sum, row) => {
+    if (isArinvoice(row)) return sum + parseMoney(row.dueamount);
+    // Only a CREDIT-side (negative dueamount) arcreditmemo nets against fees;
+    // it is hidden from the resident's list (normalizeBalanceRows shows arinvoice
+    // only) but MUST count here or derivedCredit is overstated and reconcile
+    // wrongly falls to "aggregate_only" (e.g. a -500 Pet-ID reversal).
+    // Positive arcreditmemo rows are stale reversed-invoice artifacts NOT in the
+    // ledger balance (e.g. UO-00803's 2023 rows of 28k/158k); counting them would
+    // massively overstate derivedCredit and hide legit advances.
+    if (isArcreditmemo(row)) {
+      const due = parseMoney(row.dueamount);
+      return due < 0 ? sum + due : sum;
+    }
+    return sum;
+  }, 0);
 }
 ```
+
+> **IMPORTANT — sign matters.** Count `arcreditmemo` **only when its `dueamount` is negative** (the true credit/reversal case). Some units carry **positive** `arcreditmemo` rows on the balance table that are stale reversed-invoice artifacts and are **not** reflected in the ledger balance. Example: **UO-00803 LR** has 2023 A/R Credit Memos of `+28,334.78` and `+158,351.12`. Counting those blew `sumOutstandingFees` up to ~194,438 and re-hid two small legit advances (`ACR695473-2S` ₱532.31 + `ACR697392-2S` ₱0.79 = ₱533.10). With negative-only: `7,608.32 (arinvoice) − 500 (Pet-ID reversal) = 7,108.32`; `derivedCredit = 7,108.32 − 6,575.22 = 533.10 = candidateSum` → mode `"all"` → both advances show. An early version of this fix counted *all* arcreditmemo and had to be corrected — do not repeat that.
 
 **`resident-breakdown.service.ts`** — in the `outstandingView` block, the fee-row filters previously kept only `arinvoice`. Change both to include `arcreditmemo`. These `feeRows` feed only `sumOutstandingFees` (and the past-ledger date-range calc, where an extra negative row is harmless). Display is a separate path (`normalizeBalanceRows`), so the resident still never sees the arcreditmemo:
 
@@ -754,6 +764,38 @@ it("391 dues lane — arcreditmemo counts in fees so advance still shows", () =>
   expect(result.candidateSum).toBeCloseTo(76545.94, 2);
   expect(result.mode).toBe("all");
   expect(result.displayed.map((r) => r.docno).sort()).toEqual(["ACR647020-2S", "ACR698475-2S"]);
+});
+```
+
+Second test — positive-arcreditmemo artifacts must be ignored (guards the sign rule):
+
+```ts
+it("803 dues lane — positive arcreditmemo artifacts must NOT inflate fees", () => {
+  const balanceRows: BalanceApiRow[] = [
+    { type: "arinvoice", docno: "AD-26-06-06927", dueamount: "5,500.00" },
+    { type: "arinvoice", docno: "EC-26-06-06920", dueamount: "440.00" },
+    { type: "arinvoice", docno: "SU-26-06-01775", dueamount: "500.00" },
+    { type: "arinvoice", docno: "WA-26-06-04910", dueamount: "1,168.32" },
+    { type: "arcreditmemo", docno: "ARCM-23-06-00045", dueamount: "28,334.78" },
+    { type: "arcreditmemo", docno: "ARCM-23-06-00047", dueamount: "158,351.12" },
+    { type: "arcreditmemo", docno: "ARCM-26-07-00180", dueamount: "-500.00" },
+    { type: "downpayment", docno: "ACR695473-2S", docdate: "05/11/2026", amount: "-533.40", dueamount: "-532.31" },
+    { type: "downpayment", docno: "ACR697392-2S", docdate: "05/19/2026", amount: "-886.00", dueamount: "-0.79" },
+  ];
+  const ledgerRows: LedgerApiRow[] = [
+    { docdate: "06/20/2026", docno: "WA-26-06-04910", doctype: "ARINVOICE", debit: "1,168.32", balance: "6,575.22" },
+  ];
+  const feeRows = balanceRows.filter((r) => r.type === "arinvoice" || r.type === "arcreditmemo");
+  expect(sumOutstandingFees(feeRows)).toBeCloseTo(7108.32, 2); // positive 28k/158k ignored
+  const result = reconcileLane({
+    feeRows,
+    paymentCandidateRows: balanceRows.filter((r) => r.type === "downpayment"),
+    ledgerRows,
+    source: "ledger",
+  });
+  expect(result.derivedCredit).toBeCloseTo(533.1, 2);
+  expect(result.mode).toBe("all");
+  expect(result.displayed.map((r) => r.docno).sort()).toEqual(["ACR695473-2S", "ACR697392-2S"]);
 });
 ```
 
@@ -899,7 +941,7 @@ src/lib/utils/breakdown-date-utils.ts                     # parseApiDate reused 
   - [ ] Service: outstanding-view fee-row filters (`duesFeeRows`, `electricityFeeRows`) include `arcreditmemo`. **This is the easy-to-miss step** — without it, the util fix does nothing in the running app.
   - [ ] Confirm display path (`normalizeBalanceRows`) still filters to `arinvoice` only, so arcreditmemo stays hidden from the resident.
   - [ ] Add both regression tests.
-  - [ ] Verify live: **UO-00391 LR** Payments tab shows `ACR647020-2S` (~76,545); **UO-00432 LR** Payments tab shows `ACR654326-2S` (4,044.32) and hides `ACR653666-2S`.
+  - [ ] Verify live: **UO-00391 LR** Payments tab shows `ACR647020-2S` (~76,545); **UO-00432 LR** Payments tab shows `ACR654326-2S` (4,044.32) and hides `ACR653666-2S`; **UO-00803 LR** Payments tab shows `ACR695473-2S` (532.31) + `ACR697392-2S` (0.79) despite the positive 2023 arcreditmemo artifacts.
 
 - [ ] **Change 5 (independent):**
   - [ ] Create the EBT Inspector route + page + layout; map the four query types to the superapp's EBT repository methods.

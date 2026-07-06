@@ -78,13 +78,23 @@ export function splitCsv(value: string | string[] | undefined | null): string[] 
 }
 
 export function sumOutstandingFees(rows: BalanceLikeRow[]): number {
-  // arcreditmemo carries a negative dueamount and reduces net fees. It is
-  // hidden from the resident's fee list (normalizeBalanceRows shows arinvoice
-  // only) but MUST count here, else derivedCredit is overstated by its amount
-  // and reconcileDownpaymentCandidates wrongly falls to "aggregate_only".
-  return rows
-    .filter((row) => isArinvoice(row) || isArcreditmemo(row))
-    .reduce((sum, row) => sum + parseMoney(row.dueamount), 0);
+  return rows.reduce((sum, row) => {
+    if (isArinvoice(row)) return sum + parseMoney(row.dueamount);
+    // Only a CREDIT-side (negative dueamount) arcreditmemo nets against fees;
+    // it is hidden from the resident's list (normalizeBalanceRows shows arinvoice
+    // only) but MUST count here or derivedCredit is overstated and reconcile
+    // wrongly falls to "aggregate_only" (e.g. a -500 Pet-ID reversal).
+    // Positive arcreditmemo rows are stale reversed-invoice artifacts NOT in the
+    // ledger balance (e.g. UO-00803's 2023 rows of 28k/158k); counting them would
+    // massively overstate derivedCredit and hide legit advances.
+    // ponytail: sign heuristic; if a positive arcreditmemo ever needs to count,
+    // switch to matching against the ledger balance instead.
+    if (isArcreditmemo(row)) {
+      const due = parseMoney(row.dueamount);
+      return due < 0 ? sum + due : sum;
+    }
+    return sum;
+  }, 0);
 }
 
 export function getLedgerFinalBalance(ledgerRows: LedgerApiRow[]): number {
