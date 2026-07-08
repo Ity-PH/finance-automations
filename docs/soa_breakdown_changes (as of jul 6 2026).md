@@ -1438,3 +1438,721 @@ Every case where an uncredited (advance) payment vanishes from the app traces ba
 2. If we show a summary line, which figure is correct for your purposes — the **net ₱4,081.77** (matches the credit balance already on the headline) or the **gross ₱5,021.14** (total advance before offsetting the reversed payment)?
 3. Most important, root cause: **why does the EBT still show ₱10,150.92 of advances remaining when the account only truly has about ₱5,021 unused?** Are those old 2023 water advances really still open, or is the EBT simply not clearing them once they're spent? If the EBT records can be corrected at the source, this problem mostly goes away on its own.
 4. Is that reversed ₱939.37 (ACR0564114) still genuinely collectible from the resident, or should it be written off? Your answer decides the net-vs-gross figure above.
+
+---
+
+## Change 8: Balances tab + "Remaining Credit" collapsible (Jul 8, 2026)
+
+### Problem
+
+Uncredited (advance) payments lived in a separate **Payments** tab, fully expanded, disconnected from the outstanding fees they offset. Users had to switch tabs to see that a unit had unused advance credit against its balance. The **Fees** tab and **Payments** tab treated two halves of the same balance as unrelated screens.
+
+### Decision
+
+Merge the advance-payment data into the outstanding fees view and rename that tab **Balances**:
+
+- Rename the **Fees** tab to **Balances**.
+- Inside the same Outstanding Fees card, below the fee list, add a **collapsible** "Remaining Credit" section that renders the advance-payment rows (the data previously shown in the Payments tab as "Uncredited Payments").
+- **Collapsed by default** — a single tappable summary row separated from the fee list by a top border. Left: title + muted caption `{count} payments · Tap to view`. Right: the remaining-credit total (green, accent) + a chevron that rotates 180° on open.
+- **Expanded** — an inline table (pushes content down, not a modal): description column (no header, muted, wraps), `Original` and `Remaining` columns right-aligned. No row dividers; vertical padding only. The `Remaining` column's right edge lines up with the outstanding-fee amounts above it (shared `px-3` inset inside the same `-mx-2` container).
+- Pure client-side expand/collapse — no data refetch on toggle.
+- Remove the **See Past Fees** button (it becomes a future **History** tab — not implemented yet).
+- **Payments** tab left unchanged for now (still renders `UncreditedPayments`).
+- Fee-selection logic unchanged.
+
+### Data
+
+Same rows as before: `outstandingQuery.data.rows` filtered to `kind === "payment"` (`uncreditedPaymentRows`), passed into `OutstandingFees` as `creditRows`.
+
+- description = `row.remarks`
+- original = `row.paidAmount`
+- remaining = `Math.abs(row.amount)`
+- `remainingCredit` = `sum(Math.abs(row.amount))` over all credit rows — **computed, never hardcoded**.
+- `count` = number of credit rows.
+
+Money formatted via existing `formatCurrency` (`toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })`).
+
+### Example scenario
+
+1. User views a unit with outstanding fees and 4 advance payments.
+2. **Balances** tab: fee list, then a `Remaining Credit` row showing `665.59` (= 432.32 + 21.05 + 201.11 + 11.11) and `4 payments · Tap to view`.
+3. Taps the row → chevron rotates, inline table reveals the 4 records with `Original` / `Remaining` columns; the `Remaining` edge aligns with the fee amounts above.
+4. Taps again → collapses. No network request either way.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/OutstandingFees.tsx` | **Modify** — add `creditRows` prop + `RemainingCredit` collapsible sub-component; remove `onSeePast` / "See Past Fees" button |
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** — rename tab to "Balances", pass `creditRows={uncreditedPaymentRows}`, drop fee `onSeePast` |
+
+`UncreditedPayments.tsx` is untouched (still used by the Payments tab). Its `handleSeePast("payment")` wiring stays.
+
+### Implementation
+
+**`OutstandingFees.tsx`** — new prop, drop `onSeePast`:
+
+```ts
+type OutstandingFeesProps = {
+  rows: ResidentBreakdownRow[];
+  creditRows: ResidentBreakdownRow[]; // advance/uncredited payment rows
+  // ...existing props, no onSeePast
+};
+```
+
+Render below the fee list, inside the same `<section>`:
+
+```tsx
+{!isLoading && !isError && creditRows.length > 0 && (
+  <RemainingCredit rows={creditRows} />
+)}
+```
+
+`RemainingCredit` sub-component:
+
+```tsx
+function RemainingCredit({ rows }: { rows: ResidentBreakdownRow[] }) {
+  const [open, setOpen] = useState(false);
+  const remainingCredit = rows.reduce((sum, row) => sum + Math.abs(row.amount), 0);
+
+  return (
+    <div className="-mx-2 mt-3 border-t border-gray-200 pt-2">
+      <button type="button" onClick={() => setOpen((c) => !c)}
+        className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left hover:bg-gray-50">
+        <span>
+          <span className="block text-sm font-bold">Remaining Credit</span>
+          <span className="mt-0.5 block text-xs font-medium text-gray-400">
+            {rows.length} payments · Tap to view
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-sm font-bold tabular-nums text-green-700">
+            {formatCurrency(remainingCredit)}
+          </span>
+          <LuChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
+      </button>
+
+      {open && (
+        <div>
+          {/* header: no description header, Original + Remaining right-aligned */}
+          <div className="grid grid-cols-[1fr_96px_96px] gap-2 px-3 pb-2 ...">
+            <span />
+            <span className="text-right">Original</span>
+            <span className="text-right">Remaining</span>
+          </div>
+          {rows.map((row, index) => (
+            <div key={`${row.source}-${row.docno}-${index}`}
+              className="grid grid-cols-[1fr_96px_96px] items-start gap-2 px-3 py-3">
+              <p className="... text-gray-400">{row.remarks || "No remarks"}</p>
+              <p className="text-right ... text-gray-400">
+                {row.paidAmount != null ? formatCurrency(row.paidAmount) : "-"}
+              </p>
+              <p className="text-right ...">{formatCurrency(Math.abs(row.amount))}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+Alignment note: both the fee-amount column and the credit table sit inside a `-mx-2` container with `px-3` rows, so the right edges coincide regardless of the fixed `96px` credit column widths.
+
+**`ResidentBreakdownRequest.tsx`:**
+
+```tsx
+<TabButton selected={view === "fee"} onClick={() => setView("fee")}>
+  Balances
+</TabButton>
+
+<OutstandingFees
+  rows={filteredRows}
+  creditRows={uncreditedPaymentRows}
+  // ...existing props, no onSeePast
+/>
+```
+
+No backend changes.
+
+### Deferred (not in this change)
+
+- ~~**History** tab (replaces the removed "See Past Fees" / "See Past Payments" buttons).~~ **Done — see Jul 8 changes below.**
+- ~~Reworking / removing the standalone **Payments** tab.~~ **Done — Balances/Payments tabs removed; see Jul 8 changes below.**
+- Credit rows are passed **unsorted**; the old Payments-tab block sorted by date. Add sorting here if finance wants chronological order.
+
+---
+---
+
+# UI Overhaul: History page + SOA Breakdown layout changes (Jul 8, 2026)
+
+Four frontend-only changes made together. No backend changes. These resolve the deferred items from earlier ("History tab" and "removing the standalone Payments tab").
+
+## Summary (Jul 8)
+
+| # | Change | Layer | Scope |
+|---|--------|-------|-------|
+| 8 | Unified History page with Fees/Payments tabs | UI (new route + component) | New `/soa-breakdown/history` route |
+| 9 | Split + History icon buttons on SOA breakdown page | UI | `ResidentBreakdownRequest` header |
+| 10 | CategoryPills moved inside OutstandingFees box | UI | `OutstandingFees` component |
+| 11 | Remove Balances/Payments tab pills + UncreditedPayments section | UI | `ResidentBreakdownRequest` |
+
+---
+
+## Change 8: Unified History page with Fees/Payments tab switcher
+
+### Problem
+
+Fee History and Payment History were previously accessed via separate navigations (`/soa-breakdown/results?kind=fee` and `?kind=payment`). The `kind` was controlled by a URL search param, and the page title was generic "SOA History" with no tab UI for switching between the two.
+
+### Decision
+
+Create a single **History** page at `/soa-breakdown/history` with an internal **Fees / Payments** pill-tab switcher. The tab state is managed via `useState` (not URL params). Advanced options (custom date range, category pills for fees) are behind a collapsible "Advanced Options" section.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/ResidentBreakdownHistory.tsx` | **Create** |
+| `src/app/soa-breakdown/history/page.tsx` | **Create** |
+| `src/components/billing/breakdowns/ResidentBreakdownResults.tsx` | **Delete** (replaced) |
+| `src/app/soa-breakdown/results/page.tsx` | **Delete** (replaced) |
+
+### Implementation
+
+**New `ResidentBreakdownHistory.tsx`** — replaces `ResidentBreakdownResults.tsx`. Full source of truth:
+
+```tsx
+"use client";
+
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { LuChevronLeft, LuSlidersHorizontal } from "react-icons/lu";
+import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import {
+  filterRowsByCategories,
+  type FeeCategoryId,
+} from "@/lib/utils/fee-categories";
+import { PastFees } from "@/components/billing/breakdowns/PastFees";
+import { PastPayments } from "@/components/billing/breakdowns/PastPayments";
+import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
+import {
+  dateFromMonthRange,
+  dateFromRange,
+} from "@/lib/utils/breakdown-date-utils";
+import { formatCurrency } from "@/lib/utils/breakdown-format-utils";
+import type {
+  ResidentDateRange,
+  ResidentLedgerResponse,
+} from "@/lib/schema/resident-breakdown.schema";
+```
+
+Key architectural differences from the old `ResidentBreakdownResults`:
+
+1. **Tab state is internal** (`useState<"fee" | "payment">("fee")`), not from `useSearchParams().get("kind")`.
+2. **Advanced Options section** is collapsible (closed by default) with `LuSlidersHorizontal` icon toggle:
+   - Fee tab: shows `CategoryPills` + custom month range picker + "Apply Custom Range" button.
+   - Payment tab: shows only the custom month range picker (no CategoryPills).
+3. **Header**: Back chevron (`LuChevronLeft`) linking to `/soa-breakdown` + "History" title. No close (X) button in this repo (that is two-serendra-superapp only).
+4. **No info banner** in this repo (superapp-only feature).
+5. **Tab switcher**: pill-in-track design — two buttons inside a `rounded-full bg-gray-100 p-1` container; active tab gets `bg-black text-white`.
+6. Reuses `PastFees` and `PastPayments` components unchanged.
+7. Reuses `fetchPastLedger`, `RANGE_OPTIONS`, `MONTH_OPTIONS`, `defaultMonthSelection`, `MonthYearSelect` — all moved from the deleted `ResidentBreakdownResults`.
+
+**Tab switcher markup:**
+
+```tsx
+<div className="flex rounded-full bg-gray-100 p-1">
+  <button
+    type="button"
+    onClick={() => setActiveTab("fee")}
+    className={`flex-1 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+      activeTab === "fee"
+        ? "bg-black text-white"
+        : "text-gray-500 hover:text-gray-700"
+    }`}
+  >
+    Fees
+  </button>
+  <button
+    type="button"
+    onClick={() => setActiveTab("payment")}
+    className={`flex-1 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+      activeTab === "payment"
+        ? "bg-black text-white"
+        : "text-gray-500 hover:text-gray-700"
+    }`}
+  >
+    Payments
+  </button>
+</div>
+```
+
+**Advanced Options (collapsible) markup:**
+
+```tsx
+<section>
+  <button
+    type="button"
+    onClick={() => setAdvancedOpen((c) => !c)}
+    className="flex w-full items-center justify-between"
+  >
+    <span className="text-sm font-bold text-gray-700">
+      Advanced Options
+    </span>
+    <LuSlidersHorizontal
+      className={`text-lg text-gray-400 transition-transform ${
+        advancedOpen ? "rotate-90" : ""
+      }`}
+    />
+  </button>
+
+  {advancedOpen && (
+    <div className="mt-4 space-y-4 border border-gray-200 bg-gray-50 p-4">
+      {/* CategoryPills only on fee tab */}
+      {!isPayment && (
+        <CategoryPills
+          selectedCategories={selectedCategories}
+          onChange={setSelectedCategories}
+        />
+      )}
+      {/* Custom month range picker (both tabs) */}
+      <div>
+        <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">
+          Custom Range
+        </h3>
+        {/* MonthYearSelect Start + End + Apply button — same as old ResidentBreakdownResults */}
+      </div>
+    </div>
+  )}
+</section>
+```
+
+**New route page** (`src/app/soa-breakdown/history/page.tsx`):
+
+```tsx
+"use client";
+
+import { Suspense } from "react";
+import TabNav from "@/components/TabNav";
+import { ResidentBreakdownHistory } from "@/components/billing/breakdowns/ResidentBreakdownHistory";
+import { SoaBreakdownCredentialsForm } from "@/components/billing/breakdowns/SoaBreakdownCredentialsForm";
+import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
+
+export default function SoaBreakdownHistoryPage() {
+  const { showBreakdown } = useSoaBreakdownCredentials();
+
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-12">
+      <TabNav />
+      <header className="mb-10 border-b border-gray-200 pb-6">
+        <h1 className="text-2xl font-bold tracking-tight">SOA History</h1>
+      </header>
+      <div className="space-y-8">
+        <SoaBreakdownCredentialsForm />
+        {showBreakdown && (
+          <Suspense
+            fallback={<p className="text-sm text-gray-500">Loading history...</p>}
+          >
+            <ResidentBreakdownHistory />
+          </Suspense>
+        )}
+      </div>
+    </main>
+  );
+}
+```
+
+Uses the existing `SoaBreakdownCredentialProvider` from the parent layout (`/soa-breakdown/layout.tsx`, unchanged).
+
+### Deleted files
+
+- `src/components/billing/breakdowns/ResidentBreakdownResults.tsx` — fully replaced by `ResidentBreakdownHistory.tsx`.
+- `src/app/soa-breakdown/results/page.tsx` — route replaced by `/soa-breakdown/history/page.tsx`.
+
+### Route change
+
+| Old route | New route |
+|-----------|-----------|
+| `/soa-breakdown/results?kind=fee` | `/soa-breakdown/history` (Fees tab active by default) |
+| `/soa-breakdown/results?kind=payment` | `/soa-breakdown/history` (switch to Payments tab) |
+
+**For two-serendra-superapp:** the superapp should also add:
+- A **dismissible info banner** at the top of the History page: "Transactions may take some time to properly reflect in the system. For questions, please contact or visit the Finance Office for details." with an X close button. Use `useState(true)` for visibility.
+- A **close (X) button** in the header (top-right), navigating back to the breakdown/home screen.
+
+---
+
+## Change 9: Split + History icon buttons on SOA Breakdown main page
+
+### Problem
+
+Previously, the SOA breakdown page header had a single button: "Show Split" / "Hide Split" (with `LuReceiptText` icon and text label). There was no direct way to access the History page from the main breakdown screen — users had to navigate via "See Past Fees" or "See Past Payments" links buried in the Payments tab and OutstandingFees section.
+
+### Decision
+
+Replace the single button with **two elements**, right-aligned to the balance amount:
+
+- **Chevron icon** (`LuChevronDown`) — toggles the balance split panel (existing behavior). Grouped beside the balance amount. The chevron rotates (`rotate-180`) when the split is open. `aria-label="Split"`.
+- **History link** — a text link saying "History", placed on the far right.
+
+The Split chevron is `text-xl` size with no text label. Both elements use `text-green-700 hover:text-green-900`.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** |
+
+### Implementation
+
+**Imports changed:**
+
+```diff
+-import { useRouter } from "next/navigation";
+-import { LuReceiptText } from "react-icons/lu";
++import Link from "next/link";
++import { LuChevronDown } from "react-icons/lu";
+```
+
+**Removed:** `useRouter` import, `handleSeePast` function, `BreakdownView` type.
+
+**Button markup** (replaces old single button):
+
+```tsx
+{/* Note: the wrapper div has items-center to align everything with the balance */}
+<div className="mt-2 flex items-center justify-between gap-4">
+  <div className="flex items-center gap-3">
+    {outstandingQuery.isLoading ? (
+      <div className="h-11 w-40 animate-pulse bg-gray-100" />
+    ) : (
+      <p className="text-4xl font-bold leading-none text-green-700">
+        ₱ {formatBalanceDisplay(meta?.balance)}
+      </p>
+    )}
+    {!outstandingQuery.isLoading && !outstandingQuery.isError && (
+      <button
+        type="button"
+        onClick={() => setShowDetails((current) => !current)}
+        className="text-green-700 hover:text-green-900"
+        aria-label="Split"
+      >
+        <LuChevronDown
+          className={`text-xl transition-transform ${
+            showDetails ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+    )}
+  </div>
+  {!outstandingQuery.isLoading && !outstandingQuery.isError && (
+    <Link
+      href="/soa-breakdown/history"
+      className="mr-[21px] text-sm font-semibold text-green-700 hover:text-green-900"
+    >
+      History
+    </Link>
+  )}
+</div>
+```
+
+---
+
+## Change 10: CategoryPills moved inside OutstandingFees box
+
+### Problem
+
+CategoryPills was rendered **outside** the OutstandingFees card, between the old tab pills and the fees list. This was a layout artifact from having Balances/Payments tabs.
+
+### Decision
+
+Move CategoryPills **inside** the OutstandingFees card, rendered directly below the "Outstanding Fees" heading and the "Select All" button. This matches the screenshot design where categories are contextually grouped with the fees they filter.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/OutstandingFees.tsx` | **Modify** — add category props, import and render `CategoryPills` inside the card |
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** — remove standalone `<CategoryPills>` render, pass category props to `<OutstandingFees>` |
+
+### Implementation
+
+**`OutstandingFees.tsx`** — new imports and props:
+
+```tsx
+import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import type { FeeCategoryId } from "@/lib/utils/fee-categories";
+
+type OutstandingFeesProps = {
+  rows: ResidentBreakdownRow[];
+  creditRows: ResidentBreakdownRow[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  selectedRowIds: Set<string>;
+  onToggleRow: (id: string) => void;
+  onToggleSelectAll: () => void;
+  selectedCategories: Set<FeeCategoryId>;        // NEW
+  onCategoryChange: (next: Set<FeeCategoryId>) => void;  // NEW
+};
+```
+
+CategoryPills rendered inside the `<section>`, after the heading div, before the row list:
+
+```tsx
+<div className="mb-4">
+  <CategoryPills
+    selectedCategories={selectedCategories}
+    onChange={onCategoryChange}
+  />
+</div>
+```
+
+**`ResidentBreakdownRequest.tsx`** — removed standalone `<CategoryPills>` block and the `CategoryPills` import. Now passes the props through to `<OutstandingFees>`:
+
+```tsx
+<OutstandingFees
+  rows={filteredRows}
+  creditRows={uncreditedPaymentRows}
+  isLoading={outstandingQuery.isLoading}
+  isError={outstandingQuery.isError}
+  onRetry={() => outstandingQuery.refetch()}
+  selectedRowIds={selectedRowIds}
+  onToggleRow={toggleRow}
+  onToggleSelectAll={toggleSelectAll}
+  selectedCategories={selectedCategories}
+  onCategoryChange={setSelectedCategories}
+/>
+```
+
+---
+
+## Change 11: Remove Balances/Payments tab pills + UncreditedPayments section
+
+### Problem
+
+The SOA breakdown main page had `Balances | Payments` tab pills that toggled between the OutstandingFees view and UncreditedPayments view. With the History button now providing access to full payment history, and the Remaining Credit section inside OutstandingFees already showing uncredited/advance payments inline, the separate UncreditedPayments section and the tab pills are redundant.
+
+### Decision
+
+1. **Remove** the `Balances | Payments` tab pill buttons entirely.
+2. **Remove** the `<UncreditedPayments>` section from the main breakdown page.
+3. **Remove** the `UncreditedPayments` import from `ResidentBreakdownRequest`.
+4. Show `<OutstandingFees>` **always** (no conditional rendering based on tab state).
+5. Show the "Select Fees" button **always** (no `view === "fee"` guard).
+6. **Remove** the `view` state variable (`useState<BreakdownView>`) and `BreakdownView` type.
+7. **Remove** the `TabButton` local component.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** — remove tabs, UncreditedPayments, view state, TabButton |
+| `src/components/billing/breakdowns/UncreditedPayments.tsx` | **No longer imported** from the main page (file still exists for potential future use) |
+
+### Implementation
+
+**Removed from `ResidentBreakdownRequest.tsx`:**
+
+```diff
+-import { UncreditedPayments } from "@/components/billing/breakdowns/UncreditedPayments";
+
+-type BreakdownView = "fee" | "payment";
+
+-const [view, setView] = useState<BreakdownView>("fee");
+
+-<div className="grid grid-cols-2 gap-3">
+-  <TabButton selected={view === "fee"} onClick={() => setView("fee")}>
+-    Balances
+-  </TabButton>
+-  <TabButton
+-    selected={view === "payment"}
+-    onClick={() => setView("payment")}
+-  >
+-    Payments
+-  </TabButton>
+-</div>
+
+-{view === "fee" && ( <CategoryPills ... /> )}
+
+-{view === "fee" ? ( <OutstandingFees ... /> ) : ( <UncreditedPayments ... /> )}
+
+-{view === "fee" && ( <button>Select Fees</button> )}
+
+-function TabButton({ ... }) { ... }
+```
+
+**Replaced with** (flat, no tabs):
+
+```tsx
+<OutstandingFees
+  rows={filteredRows}
+  creditRows={uncreditedPaymentRows}
+  isLoading={outstandingQuery.isLoading}
+  isError={outstandingQuery.isError}
+  onRetry={() => outstandingQuery.refetch()}
+  selectedRowIds={selectedRowIds}
+  onToggleRow={toggleRow}
+  onToggleSelectAll={toggleSelectAll}
+  selectedCategories={selectedCategories}
+  onCategoryChange={setSelectedCategories}
+/>
+
+<button
+  type="button"
+  disabled={selectedRowIds.size === 0}
+  className={`w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
+    selectedRowIds.size > 0
+      ? "bg-green-700 text-white hover:bg-green-800"
+      : "cursor-not-allowed bg-gray-100 text-gray-300"
+  }`}
+>
+  {selectedRowIds.size > 0
+    ? `Selected ₱${formatCurrency(selectedSum)}`
+    : "Select Fees"}
+</button>
+```
+
+Note: `uncreditedPaymentRows` is still computed and passed as `creditRows` to `OutstandingFees` — the **Remaining Credit** collapsible section inside `OutstandingFees` uses these rows. The standalone `UncreditedPayments` section was the only thing removed.
+
+### UncreditedPayments.tsx — previous changes to note
+
+In an earlier step during this session, `UncreditedPayments.tsx` was also modified to **remove the `onSeePast` prop** and the "See Past Payments" button. The current state of this file:
+
+- `onSeePast` prop: **removed**
+- "See Past Payments" button: **removed**
+- Header simplified to just title + subtitle (no action button)
+- File still exists but is **no longer imported** by `ResidentBreakdownRequest`
+
+---
+
+## Complete file inventory (Jul 8 changes)
+
+### New files
+
+```
+src/components/billing/breakdowns/ResidentBreakdownHistory.tsx
+src/app/soa-breakdown/history/page.tsx
+```
+
+### Deleted files
+
+```
+src/components/billing/breakdowns/ResidentBreakdownResults.tsx
+src/app/soa-breakdown/results/page.tsx
+```
+
+### Modified files
+
+```
+src/components/billing/breakdowns/ResidentBreakdownRequest.tsx
+src/components/billing/breakdowns/OutstandingFees.tsx
+src/components/billing/breakdowns/UncreditedPayments.tsx
+```
+
+### Unchanged but required by these changes
+
+```
+src/components/billing/breakdowns/CategoryPills.tsx          — unchanged, now rendered by OutstandingFees instead of ResidentBreakdownRequest
+src/components/billing/breakdowns/PastFees.tsx               — unchanged, used by ResidentBreakdownHistory
+src/components/billing/breakdowns/PastPayments.tsx           — unchanged, used by ResidentBreakdownHistory
+src/components/billing/breakdowns/InspectedUnitLabel.tsx     — unchanged
+src/components/billing/breakdowns/SoaBreakdownCredentialsForm.tsx — unchanged
+src/components/providers/SoaBreakdownCredentialProvider.tsx   — unchanged
+src/app/soa-breakdown/layout.tsx                             — unchanged (provides QueryProvider + SoaBreakdownCredentialProvider)
+src/lib/utils/fee-categories.ts                              — unchanged
+src/lib/utils/breakdown-date-utils.ts                        — unchanged (dateFromRange, dateFromMonthRange)
+src/lib/utils/breakdown-format-utils.ts                      — unchanged (formatCurrency, formatCompactMonthYearRangeLabel, etc.)
+src/lib/schema/resident-breakdown.schema.ts                  — unchanged (ResidentDateRange, ResidentLedgerResponse types)
+```
+
+---
+
+## Port checklist for two-serendra-superapp (Jul 8 changes)
+
+All changes are frontend-only. No API or backend changes.
+
+- [ ] **1. Delete old history/results route and component**
+  - [ ] Delete the superapp equivalent of `ResidentBreakdownResults.tsx`
+  - [ ] Delete the superapp equivalent of `/soa-breakdown/results/page.tsx`
+
+- [ ] **2. Create new History component**
+  - [ ] Create `ResidentBreakdownHistory.tsx` with:
+    - [ ] Internal Fees/Payments tab state (not URL params)
+    - [ ] Pill-in-track tab switcher
+    - [ ] Collapsible Advanced Options (with `LuSlidersHorizontal` icon)
+    - [ ] CategoryPills inside Advanced Options for fee tab only
+    - [ ] Custom month range picker for both tabs
+    - [ ] Period pills (1 Month, 3 Months, 6 Months, This Year)
+    - [ ] Total display (₱ green bold)
+    - [ ] Back chevron header
+  - [ ] **Superapp-only additions:**
+    - [ ] Add **close (X) button** in header (top-right)
+    - [ ] Add **dismissible info banner** below header
+
+- [ ] **3. Create new History page route**
+  - [ ] Create `/soa-breakdown/history/page.tsx`
+  - [ ] Ensure parent layout provides credential + query providers
+
+- [ ] **4. Update SOA Breakdown main page**
+  - [ ] Add `LuChevronDown` icon next to balance — toggles split panel and rotates (`rotate-180`) when open.
+  - [ ] Add "History" text link next to it, aligned to the right. Both should use `text-sm text-green-700 hover:text-green-900`.
+  - [ ] Remove `Balances | Payments` tab pills and `TabButton` component
+  - [ ] Remove `UncreditedPayments` import and section (Remaining Credit in OutstandingFees covers it)
+  - [ ] Remove `view` state and `BreakdownView` type
+  - [ ] Remove `handleSeePast` / `onSeePast` plumbing
+
+- [ ] **5. Move CategoryPills into OutstandingFees**
+  - [ ] Add `selectedCategories` and `onCategoryChange` props to `OutstandingFees`
+  - [ ] Import and render `CategoryPills` inside the OutstandingFees card, after the heading
+  - [ ] Remove standalone `<CategoryPills>` from parent
+
+- [ ] **6. Update UncreditedPayments** (if still used elsewhere)
+  - [ ] Remove `onSeePast` prop
+  - [ ] Remove "See Past Payments" button
+  - [ ] Simplify header
+
+- [ ] **7. Update any links/references**
+  - [ ] Search for `/soa-breakdown/results` and replace with `/soa-breakdown/history`
+  - [ ] Search for `ResidentBreakdownResults` and replace with `ResidentBreakdownHistory`
+
+- [ ] **8. Icon dependencies**
+  - [ ] Ensure `react-icons` includes `LuChevronDown`, `LuChevronLeft`, `LuSlidersHorizontal` (all from `react-icons/lu`)
+
+- [ ] **9. Manual verification**
+  - [ ] SOA breakdown page: Split chevron (`LuChevronDown`) and History text link show on same line, right-aligned to balance.
+  - [ ] Click Split → balance split panel toggles
+  - [ ] Click History → navigates to `/soa-breakdown/history`
+  - [ ] History page: Fees tab active by default, shows total fees, period pills, settled fees list
+  - [ ] Switch to Payments tab: total changes, categories disappear from advanced options, past payments list shows
+  - [ ] Advanced Options toggle works, CategoryPills only on fee tab
+  - [ ] Custom date range works for both tabs
+  - [ ] Back chevron returns to `/soa-breakdown`
+  - [ ] CategoryPills appear inside OutstandingFees box on main page
+  - [ ] No UncreditedPayments section on main page
+  - [ ] Remaining Credit section inside OutstandingFees still works
+  - [ ] Select Fees button always visible (not gated by tab)
+
+---
+
+## Port notes (Jul 8 changes)
+
+1. **Route rename is the main breaking change.** Any deep links, bookmarks, or navigation calls using `/soa-breakdown/results` must update to `/soa-breakdown/history`. The `?kind=fee|payment` query param is no longer used.
+2. **`UncreditedPayments.tsx` still exists** in the codebase. It is not deleted, just no longer imported on the main page. If the superapp uses it elsewhere, leave it; otherwise it can be deleted.
+3. **CategoryPills is now a child of OutstandingFees**, not a sibling. Category state is still managed by the parent (`ResidentBreakdownRequest`) and passed down — the OutstandingFees component does not own it.
+4. **Two-serendra-superapp must add two things this repo intentionally omits:** the dismissible info banner and the close (X) button on the History page.
+5. **All data-fetching patterns are unchanged.** Same `fetchPastLedger`, same `useQuery` keys, same API endpoints. The History component just manages the `kind` internally instead of reading from URL params.
+
+---
+
+## Reference: finance-automations source of truth (Jul 8, 2026)
+
+Compare these files directly when porting:
+
+- `src/components/billing/breakdowns/ResidentBreakdownHistory.tsx` (NEW — replaces ResidentBreakdownResults)
+- `src/app/soa-breakdown/history/page.tsx` (NEW — replaces results/page.tsx)
+- `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` (MODIFIED)
+- `src/components/billing/breakdowns/OutstandingFees.tsx` (MODIFIED)
+- `src/components/billing/breakdowns/UncreditedPayments.tsx` (MODIFIED — onSeePast removed)
