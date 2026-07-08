@@ -3,13 +3,12 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import { LuChevronLeft, LuSlidersHorizontal } from "react-icons/lu";
 import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
 import {
   filterRowsByCategories,
   type FeeCategoryId,
 } from "@/lib/utils/fee-categories";
-import { InspectedUnitLabel } from "@/components/billing/breakdowns/InspectedUnitLabel";
 import { PastFees } from "@/components/billing/breakdowns/PastFees";
 import { PastPayments } from "@/components/billing/breakdowns/PastPayments";
 import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
@@ -24,6 +23,7 @@ import type {
 } from "@/lib/schema/resident-breakdown.schema";
 
 type ApiResponse<T> = { success: boolean; data?: T; error?: string };
+type HistoryTab = "fee" | "payment";
 
 const RANGE_OPTIONS: { value: ResidentDateRange; label: string }[] = [
   { value: "lastMonth", label: "1 Month" },
@@ -81,11 +81,11 @@ async function fetchPastLedger(
   return body.data;
 }
 
-export function ResidentBreakdownResults() {
-  const searchParams = useSearchParams();
-  const kind = searchParams.get("kind") === "payment" ? "payment" : "fee";
-  const isPayment = kind === "payment";
+export function ResidentBreakdownHistory() {
   const { credentials, hasCredentials } = useSoaBreakdownCredentials();
+
+  const [activeTab, setActiveTab] = useState<HistoryTab>("fee");
+  const isPayment = activeTab === "payment";
 
   const defaultMonths = useMemo(() => defaultMonthSelection(), []);
   const yearOptions = useMemo(() => {
@@ -106,6 +106,7 @@ export function ResidentBreakdownResults() {
   const [selectedCategories, setSelectedCategories] = useState<
     Set<FeeCategoryId>
   >(new Set());
+  const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { dateFrom, dateTo } = useMemo(() => {
     if (useCustom) {
@@ -137,7 +138,7 @@ export function ResidentBreakdownResults() {
       credentials.district,
       dateFrom,
       dateTo,
-      kind,
+      activeTab,
     ],
     queryFn: () =>
       fetchPastLedger(
@@ -145,7 +146,7 @@ export function ResidentBreakdownResults() {
         credentials.district,
         dateFrom,
         dateTo,
-        kind,
+        activeTab,
       ),
     enabled: hasCredentials && dateFrom !== "" && dateTo !== "",
   });
@@ -172,33 +173,63 @@ export function ResidentBreakdownResults() {
 
   return (
     <div className="space-y-6">
-      <InspectedUnitLabel />
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
-            {isPayment ? "Total Payments" : "Total Fees"}
-          </p>
-          {ledgerQuery.isLoading ? (
-            <div className="mt-2 h-11 w-40 animate-pulse bg-gray-100" />
-          ) : (
-            <p className="mt-2 text-4xl font-bold leading-none text-green-700">
-              ₱ {formatCurrency(total)}
-            </p>
-          )}
-        </div>
+      {/* Header */}
+      <div className="flex items-center gap-3">
         <Link
           href="/soa-breakdown"
-          className="text-sm font-semibold text-blue-600 hover:text-blue-800"
+          className="flex items-center gap-1 text-sm font-semibold text-gray-700 hover:text-black"
         >
-          Back
+          <LuChevronLeft className="text-lg" />
         </Link>
+        <h2 className="text-xl font-bold tracking-tight">History</h2>
       </div>
 
+      {/* Tab Switcher */}
+      <div className="flex rounded-full bg-gray-100 p-1">
+        <button
+          type="button"
+          onClick={() => setActiveTab("fee")}
+          className={`flex-1 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+            activeTab === "fee"
+              ? "bg-black text-white"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Fees
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("payment")}
+          className={`flex-1 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+            activeTab === "payment"
+              ? "bg-black text-white"
+              : "text-gray-500 hover:text-gray-700"
+          }`}
+        >
+          Payments
+        </button>
+      </div>
+
+      {/* Total Display */}
+      <div>
+        <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
+          {isPayment ? "Total Payments" : "Total Fees"}
+        </p>
+        {ledgerQuery.isLoading ? (
+          <div className="mt-2 h-11 w-40 animate-pulse bg-gray-100" />
+        ) : (
+          <p className="mt-2 text-4xl font-bold leading-none text-green-700">
+            ₱ {formatCurrency(total)}
+          </p>
+        )}
+      </div>
+
+      {/* Period Pills */}
       <section>
         <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-gray-500">
           Period
         </label>
-        <div className="flex gap-2 overflow-x-auto pb-1">
+        <div className="flex flex-wrap gap-2 pb-1">
           {RANGE_OPTIONS.map((option) => (
             <button
               key={option.value}
@@ -219,54 +250,77 @@ export function ResidentBreakdownResults() {
         </div>
       </section>
 
-      {!isPayment && (
-        <CategoryPills
-          selectedCategories={selectedCategories}
-          onChange={setSelectedCategories}
-        />
-      )}
-
-      <section className="border border-gray-200 bg-gray-50 p-4">
-        <h3 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
-          Advanced Custom Range
-        </h3>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <MonthYearSelect
-            label="Start"
-            month={customStartMonth}
-            year={customStartYear}
-            yearOptions={yearOptions}
-            onMonthChange={setCustomStartMonth}
-            onYearChange={setCustomStartYear}
-          />
-          <MonthYearSelect
-            label="End"
-            month={customEndMonth}
-            year={customEndYear}
-            yearOptions={yearOptions}
-            onMonthChange={setCustomEndMonth}
-            onYearChange={setCustomEndYear}
-          />
-        </div>
-        {customMonthInvalid && (
-          <p className="mt-3 text-xs font-medium text-red-700">
-            End month must be on or after start month.
-          </p>
-        )}
+      {/* Advanced Options */}
+      <section>
         <button
           type="button"
-          disabled={customMonthInvalid}
-          onClick={() => setUseCustom(true)}
-          className={`mt-4 w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
-            customMonthInvalid
-              ? "cursor-not-allowed bg-gray-100 text-gray-300"
-              : "bg-black text-white hover:bg-gray-800"
-          }`}
+          onClick={() => setAdvancedOpen((c) => !c)}
+          className="flex w-full items-center justify-between"
         >
-          Apply Custom Range
+          <span className="text-sm font-bold text-gray-700">
+            Advanced Options
+          </span>
+          <LuSlidersHorizontal
+            className={`text-lg text-gray-400 transition-transform ${
+              advancedOpen ? "rotate-90" : ""
+            }`}
+          />
         </button>
+
+        {advancedOpen && (
+          <div className="mt-4 space-y-4 border border-gray-200 bg-gray-50 p-4">
+            {!isPayment && (
+              <CategoryPills
+                selectedCategories={selectedCategories}
+                onChange={setSelectedCategories}
+              />
+            )}
+
+            <div>
+              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">
+                Custom Range
+              </h3>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <MonthYearSelect
+                  label="Start"
+                  month={customStartMonth}
+                  year={customStartYear}
+                  yearOptions={yearOptions}
+                  onMonthChange={setCustomStartMonth}
+                  onYearChange={setCustomStartYear}
+                />
+                <MonthYearSelect
+                  label="End"
+                  month={customEndMonth}
+                  year={customEndYear}
+                  yearOptions={yearOptions}
+                  onMonthChange={setCustomEndMonth}
+                  onYearChange={setCustomEndYear}
+                />
+              </div>
+              {customMonthInvalid && (
+                <p className="mt-3 text-xs font-medium text-red-700">
+                  End month must be on or after start month.
+                </p>
+              )}
+              <button
+                type="button"
+                disabled={customMonthInvalid}
+                onClick={() => setUseCustom(true)}
+                className={`mt-4 w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
+                  customMonthInvalid
+                    ? "cursor-not-allowed bg-gray-100 text-gray-300"
+                    : "bg-black text-white hover:bg-gray-800"
+                }`}
+              >
+                Apply Custom Range
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
+      {/* Content */}
       {isPayment ? (
         <PastPayments
           dateFrom={dateFrom}
