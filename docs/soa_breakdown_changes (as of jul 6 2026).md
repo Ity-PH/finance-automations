@@ -1024,7 +1024,9 @@ The adjustment is a wash; removing it consistently leaves `derivedCredit` identi
 | Keep adjustment | 939.37 | −4,081.77 | **5,021.14** |
 | Remove it from **both** sides | 0 | −5,021.14 | **5,021.14** |
 
-The −4,081.77 balance already includes the +939.37 debit, so you cannot drop it from fees only (that double-counts). Done consistently, `derivedCredit` stays **5,021.14**. **The adjustment is a red herring for the amount — it is not why nothing shows.**
+Done consistently on **both** sides (the gross interpretation, treating the reversed payment as genuine credit), `derivedCredit` stays **5,021.14**. **The adjustment is a red herring for whether anything shows — it is not why nothing appears.**
+
+> **Correction (see Finding 2c):** the parenthetical claim once here — that dropping the adjustment from fees *only* "double-counts" — is **wrong**. The ledger already nets the reversed payment (`ACR0564114` credit) against its reversal (`OT-24-04-00009` debit) to zero, so the −4,081.77 does **not** carry a live +939.37. Dropping the dead invoice from the balance alone is legitimate and yields the **correct net** derivedCredit of 4,081.77. It still doesn't surface the advances, but for a different reason (stale candidates) — detailed below.
 
 ### Finding 2b — empirical test: excluding ADJUSTMENT rows does NOT surface the advances
 
@@ -1049,6 +1051,34 @@ Finance (interview) proposed that any arinvoice whose remarks match `/\badjustme
 | ACR573509-F | 699.90 | 16,437.50 | 16,437.50 | exhausted |
 
 The real credit (₱4,081.77) exists at the account level but cannot be pinned to any specific ACR — the shared-CM over-count destroys per-row attribution. This is why neither "trust EBT" (overstates, 10,150.92) nor "trust ledger per-row" (understates, 200) is correct, and only the **aggregate synthetic row** (solution 1) surfaces the right number.
+
+### Finding 2c — excluding the adjustment from the BALANCE ONLY: corrects `derivedCredit`, still doesn't reconcile
+
+A subtler variant, prompted by the question: *"is this just finance failing to clear the reversed payment off the balance table?"* Here the adjustment is dropped from the **balance table only**, leaving the ledger fully intact (unlike Finding 2b's symmetric both-sides removal).
+
+First, the ledger facts (`ACR0564114` and `OT-24-04-00009` traced live):
+
+```
+row 51  03/05/2024  ACR0564114     INCOMINGPAYMENT  credit 939.37   ← payment received
+row 58  04/01/2024  OT-24-04-00009 ARINVOICE        debit  939.37   ← reversal ("Adjustment to ACR0564114")
+```
+
+Both sit mid-ledger and **cancel** — net **zero** contribution to the final running balance of −4,081.77. So the −4,081.77 does **not** contain a live +939.37; the adjustment already consumed itself canceling its own payment inside the ledger. The only place the 939.37 still lingers as a *live* item is the **balance table**, as a stale open arinvoice.
+
+Replaying the algorithm with `OT-24-04-00009` removed from the balance (ledger untouched):
+
+| Treatment | sumFees | ledgerBal | derivedCredit | candidateSum | closest subset | mode | displayed |
+|---|---|---|---|---|---|---|---|
+| Current (OT on balance) | 939.37 | −4,081.77 | 5,021.14 | 10,150.92 | 4,798.90 (off 222.24) | `aggregate_only` | **nothing** |
+| **OT removed from balance only** | 0 | −4,081.77 | **4,081.77** | 10,150.92 | 4,099.00 (off 17.23) | `aggregate_only` | **nothing** |
+
+**Two conclusions:**
+
+1. **The lingering OT invoice is a genuine finance data-hygiene defect, and clearing it is legitimate.** Removing it from the balance alone does **not** double-count (the ledger already nets the reversal), and it moves `derivedCredit` from the overstated 5,021.14 to **4,081.77 — exactly the headline net credit.** This is the *more correct* trusted total. It also settles the **net-vs-gross** question (open Q2 / solutions §1): the reversed ₱939.37 is not floating credit, so **net 4,081.77 is the right figure**, and the reversed payment should simply be written off the open-items list.
+
+2. **But it still does not surface the advances.** Even at the correct 4,081.77, no subset of the stale downpayment remainings `{3,217.60, 3,899.00, 2,134.42, 200.00, 699.90}` sums to it — closest is 4,099.00 (`ACR0544409 + ACR654632-2S`), off ₱17.23, outside tolerance. Mode stays `aggregate_only`; nothing shows.
+
+**Verdict:** clearing the reversed payment off the balance is worth doing for accuracy (correct, net-consistent `derivedCredit`), but it is **not** the fix for the disappearing-advance bug. The stale, unreconcilable downpayment remainings (Finding 3) are the real blocker either way.
 
 ## Finding 3 — the real blocker: EBT downpayment remainings are stale and unreconcilable
 
@@ -1076,6 +1106,33 @@ Attempted to recompute each downpayment's real remaining by allocating credit-me
 | ACR573509-F | 16,437.50 | 16,437.50 | 0.00 | 8,218.75 |
 
 **Conclusion:** which specific advance holds the ₱5,021.14 cannot be determined from this data. Only the **aggregate** is trustworthy.
+
+### Finding 4b — finance-confirmed phantom (ACR0534441): pruning it does NOT reconcile the unit
+
+Finance (later interview) confirmed that **`ACR0534441` is fully applied in the ledger and should not surface** — i.e. it is a phantom, exactly what the reconciler already suspects. Two things were tested: (a) is the claim true, and (b) does removing it let the remaining water advances surface.
+
+**(a) The phantom claim is correct — verified from its refdocs.** `ACR0534441` (₱4,000 paid) is referenced by four credit memos, one of which is **solely** its own:
+
+| Credit memo | credit | shared with | 
+|---|---|---|
+| CM-24-02-02056 | 1,654.66 | **sole (ACR0534441 only)** |
+| CM-23-10-02625 | 3,665.29 | ACR0495696 |
+| CM-24-01-00565 | 3,930.22 | ACR0532287 |
+| CM-25-10-12459 | 883.40 | ACR0544409 |
+
+Every allocation exceeds the ₱4,000 paid — naive-full **10,133.57**, fair all-payment split **5,894.11**, and even the sole memo alone (1,654.66) already beats EBT's implied "applied" of 782.40. The row is unambiguously consumed; its EBT `dueamount` of 3,217.60 is 100% stale. **Finance is right.**
+
+**(b) Removing the phantom does not surface the rest.** Replayed with `ACR0534441` dropped from the candidate list, against both derivedCredit targets (adjustment kept = 5,021.14; adjustment removed from balance = 4,081.77):
+
+| Candidate set | candidateSum | vs 5,021.14 | vs 4,081.77 | mode |
+|---|---|---|---|---|
+| All 5 rows | 10,150.92 | no (closest 4,798.90) | no (closest 4,099.00) | `aggregate_only` |
+| **Remove ACR0534441** | 6,933.32 | no (closest 4,798.90) | no (closest 4,099.00) | `aggregate_only` |
+| Remove ACR0534441 + ACR0544409 | 3,034.32 | no | no (now *below* target) | `aggregate_only` |
+
+The closest subsets (4,798.90 / 4,099.00) **never contained `ACR0534441`**, so removing it is a no-op for the match. Worse, pruning eventually pushes `candidateSum` *below* `derivedCredit`, flipping the failure from "overstated" to "shortfall" — still `aggregate_only`, still nothing shown.
+
+**Why pruning can't win.** The floating credit is not cleanly located in these rows. By fair (all-payment) credit-memo split, the *true* remaining is: `ACR0534441` **0** (phantom ✓), `ACR0544409` 0, `ACR0621965` 0, `ACR654632-2S` 200, `ACR573509-F` **8,218.75** (indeterminate — its single memo `CM-25-12-13218` is shared with `ACR573509-E`). Total true remaining ranges from **200** (naive) to **8,418.75** (all-split) depending on how shared memos are allocated — and **no** consistent allocation lands on the ~4,081.77 the account actually holds. Confirming one phantom is correct data hygiene, but the remaining rows are individually indeterminate, so the aggregate credit still cannot be attributed to specific rows. This **reinforces Finding 4**: only the aggregate is trustworthy; the fix is the synthetic aggregate line (solution 1), not row-pruning.
 
 ## Why this is different from Changes 6 and 7
 
