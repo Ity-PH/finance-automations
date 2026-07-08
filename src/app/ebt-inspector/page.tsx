@@ -132,130 +132,132 @@ export default function EbtInspectorPage() {
   };
 
   return (
-    <main className="mx-auto max-w-5xl px-6 py-12">
-      <TabNav />
+    <main className="py-12">
+      <div className="mx-auto max-w-5xl px-6">
+        <TabNav />
 
-      <header className="mb-10 border-b border-gray-200 pb-6">
-        <h1 className="text-2xl font-bold tracking-tight">EBT Inspector</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          View raw EBT data as a table. No processing — exactly what the EBT
-          returns.
-        </p>
-      </header>
+        <header className="mb-10 border-b border-gray-200 pb-6">
+          <h1 className="text-2xl font-bold tracking-tight">EBT Inspector</h1>
+          <p className="mt-1 text-sm text-gray-500">
+            View raw EBT data as a table. No processing — exactly what the EBT
+            returns.
+          </p>
+        </header>
 
-      <form
-        onSubmit={handleSubmit}
-        className="border border-gray-200 bg-gray-50 p-4"
-      >
-        <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
-          Query
-        </h2>
+        <form
+          onSubmit={handleSubmit}
+          className="border border-gray-200 bg-gray-50 p-4"
+        >
+          <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-gray-400">
+            Query
+          </h2>
 
-        <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
-          <label className="flex flex-col gap-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
-              Customer No.
-            </span>
-            <input
-              value={bpcode}
-              onChange={(e) => setBpcode(e.target.value)}
-              className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
-            />
-          </label>
-
-          <label className="flex flex-col gap-2">
-            <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
-              District
-            </span>
-            <select
-              value={district}
-              onChange={(e) => setDistrict(e.target.value as District)}
-              className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
-            >
-              <option value="HR">HR</option>
-              <option value="LR">LR</option>
-            </select>
-          </label>
-        </div>
-
-        <label className="mt-4 flex flex-col gap-2">
-          <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
-            Query Type
-          </span>
-          <select
-            value={type}
-            onChange={(e) => setType(e.target.value as QueryType)}
-            className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
-          >
-            {QUERY_TYPES.map((qt) => (
-              <option key={qt.value} value={qt.value}>
-                {qt.label}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        {needsDates(type) && (
-          <div className="mt-4 grid gap-4 sm:grid-cols-2">
+          <div className="grid gap-4 sm:grid-cols-[1fr_120px]">
             <label className="flex flex-col gap-2">
               <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
-                Date From (MM/DD/YYYY)
+                Customer No.
               </span>
               <input
-                value={dateFrom}
-                onChange={(e) => setDateFrom(e.target.value)}
+                value={bpcode}
+                onChange={(e) => setBpcode(e.target.value)}
                 className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
               />
             </label>
+
             <label className="flex flex-col gap-2">
               <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
-                Date To (MM/DD/YYYY)
+                District
               </span>
-              <input
-                value={dateTo}
-                onChange={(e) => setDateTo(e.target.value)}
+              <select
+                value={district}
+                onChange={(e) => setDistrict(e.target.value as District)}
                 className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
-              />
+              >
+                <option value="HR">HR</option>
+                <option value="LR">LR</option>
+              </select>
             </label>
           </div>
-        )}
 
-        <button
-          type="submit"
-          disabled={!bpcode.trim()}
-          className={`mt-4 w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
-            bpcode.trim()
-              ? "cursor-pointer bg-black text-white hover:bg-gray-800"
-              : "cursor-not-allowed bg-gray-100 text-gray-300"
-          }`}
-        >
-          Query EBT
-        </button>
-      </form>
+          <label className="mt-4 flex flex-col gap-2">
+            <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
+              Query Type
+            </span>
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value as QueryType)}
+              className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
+            >
+              {QUERY_TYPES.map((qt) => (
+                <option key={qt.value} value={qt.value}>
+                  {qt.label}
+                </option>
+              ))}
+            </select>
+          </label>
 
-      {submitted && (
-        <section className="mt-8">
-          {query.isLoading && (
-            <p className="text-sm text-gray-400">Loading EBT data…</p>
-          )}
-
-          {query.isError && (
-            <div className="flex items-center gap-3">
-              <p className="text-sm font-medium text-red-700">
-                {(query.error as Error)?.message ?? "Failed to load."}
-              </p>
-              <button
-                type="button"
-                onClick={() => query.refetch()}
-                className="text-sm font-bold text-red-700 underline"
-              >
-                Retry
-              </button>
+          {needsDates(type) && (
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
+                  Date From (MM/DD/YYYY)
+                </span>
+                <input
+                  value={dateFrom}
+                  onChange={(e) => setDateFrom(e.target.value)}
+                  className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
+                />
+              </label>
+              <label className="flex flex-col gap-2">
+                <span className="text-xs font-bold uppercase tracking-widest text-gray-500">
+                  Date To (MM/DD/YYYY)
+                </span>
+                <input
+                  value={dateTo}
+                  onChange={(e) => setDateTo(e.target.value)}
+                  className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
+                />
+              </label>
             </div>
           )}
 
-          {!query.isLoading && !query.isError && (
-            <>
+          <button
+            type="submit"
+            disabled={!bpcode.trim()}
+            className={`mt-4 w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
+              bpcode.trim()
+                ? "cursor-pointer bg-black text-white hover:bg-gray-800"
+                : "cursor-not-allowed bg-gray-100 text-gray-300"
+            }`}
+          >
+            Query EBT
+          </button>
+        </form>
+      </div>
+
+      {submitted && (
+        <section className="mt-8">
+          <div className="mx-auto max-w-5xl px-6">
+            {query.isLoading && (
+              <p className="text-sm text-gray-400">Loading EBT data…</p>
+            )}
+
+            {query.isError && (
+              <div className="flex items-center gap-3">
+                <p className="text-sm font-medium text-red-700">
+                  {(query.error as Error)?.message ?? "Failed to load."}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => query.refetch()}
+                  className="text-sm font-bold text-red-700 underline"
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+
+            {!query.isLoading && !query.isError && (
               <div className="mb-3 flex items-center justify-between">
                 <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
                   {rows.length} row{rows.length === 1 ? "" : "s"}
@@ -271,42 +273,46 @@ export default function EbtInspectorPage() {
                   </button>
                 )}
               </div>
+            )}
+            
+            {!query.isLoading && !query.isError && rows.length === 0 && (
+              <p className="text-sm text-gray-400">No rows returned.</p>
+            )}
+          </div>
 
-              {rows.length === 0 ? (
-                <p className="text-sm text-gray-400">No rows returned.</p>
-              ) : (
-                <div className="overflow-x-auto border border-gray-200">
-                  <table className="min-w-full border-collapse text-sm">
-                    <thead>
-                      <tr className="bg-gray-100">
+          {!query.isLoading && !query.isError && rows.length > 0 && (
+            <div className="w-full px-6">
+              <div className="overflow-x-auto border border-gray-200">
+                <table className="min-w-full border-collapse text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      {columns.map((col) => (
+                        <th
+                          key={col}
+                          className="whitespace-nowrap border border-gray-200 px-3 py-2 text-left font-bold uppercase tracking-wide text-gray-600"
+                        >
+                          {col}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.map((row, i) => (
+                      <tr key={i} className="odd:bg-white even:bg-gray-50">
                         {columns.map((col) => (
-                          <th
+                          <td
                             key={col}
-                            className="whitespace-nowrap border border-gray-200 px-3 py-2 text-left font-bold uppercase tracking-wide text-gray-600"
+                            className="whitespace-nowrap border border-gray-200 px-3 py-2 text-gray-800"
                           >
-                            {col}
-                          </th>
+                            {cellToString(row[col])}
+                          </td>
                         ))}
                       </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row, i) => (
-                        <tr key={i} className="odd:bg-white even:bg-gray-50">
-                          {columns.map((col) => (
-                            <td
-                              key={col}
-                              className="whitespace-nowrap border border-gray-200 px-3 py-2 text-gray-800"
-                            >
-                              {cellToString(row[col])}
-                            </td>
-                          ))}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
           )}
         </section>
       )}
