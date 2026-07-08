@@ -1,5 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { LuChevronDown } from "react-icons/lu";
+import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import type { FeeCategoryId } from "@/lib/utils/fee-categories";
 import {
   formatCurrency,
   formatDateDocnoLabel,
@@ -8,24 +12,28 @@ import type { ResidentBreakdownRow } from "@/lib/schema/resident-breakdown.schem
 
 type OutstandingFeesProps = {
   rows: ResidentBreakdownRow[];
+  creditRows: ResidentBreakdownRow[];
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
   selectedRowIds: Set<string>;
   onToggleRow: (id: string) => void;
   onToggleSelectAll: () => void;
-  onSeePast: () => void;
+  selectedCategories: Set<FeeCategoryId>;
+  onCategoryChange: (next: Set<FeeCategoryId>) => void;
 };
 
 export function OutstandingFees({
   rows,
+  creditRows,
   isLoading,
   isError,
   onRetry,
   selectedRowIds,
   onToggleRow,
   onToggleSelectAll,
-  onSeePast,
+  selectedCategories,
+  onCategoryChange,
 }: OutstandingFeesProps) {
   const visibleRowIds = rows.map((row) => `${row.source}-${row.docno}`);
   const allVisibleSelected =
@@ -36,24 +44,22 @@ export function OutstandingFees({
     <section className="border border-gray-200 bg-white p-5">
       <div className="mb-5 flex items-center justify-between gap-4">
         <h3 className="text-lg font-bold">Outstanding Fees</h3>
-        <div className="flex items-center gap-4">
-          {!isLoading && !isError && rows.length > 0 && (
-            <button
-              type="button"
-              onClick={onToggleSelectAll}
-              className="text-sm font-semibold text-green-700 hover:text-green-900"
-            >
-              {allVisibleSelected ? "Unselect All" : "Select All"}
-            </button>
-          )}
+        {!isLoading && !isError && rows.length > 0 && (
           <button
             type="button"
-            onClick={onSeePast}
-            className="shrink-0 text-sm font-semibold text-blue-600 hover:text-blue-800"
+            onClick={onToggleSelectAll}
+            className="text-sm font-semibold text-green-700 hover:text-green-900"
           >
-            See Past Fees
+            {allVisibleSelected ? "Unselect All" : "Select All"}
           </button>
-        </div>
+        )}
+      </div>
+
+      <div className="mb-4">
+        <CategoryPills
+          selectedCategories={selectedCategories}
+          onChange={onCategoryChange}
+        />
       </div>
 
       {isLoading && <LoadingRows count={4} />}
@@ -111,7 +117,70 @@ export function OutstandingFees({
           })}
         </div>
       )}
+
+      {!isLoading && !isError && creditRows.length > 0 && (
+        <RemainingCredit rows={creditRows} />
+      )}
     </section>
+  );
+}
+
+function RemainingCredit({ rows }: { rows: ResidentBreakdownRow[] }) {
+  const [open, setOpen] = useState(false);
+  const remainingCredit = rows.reduce(
+    (sum, row) => sum + Math.abs(row.amount),
+    0,
+  );
+
+  return (
+    <div className="-mx-2 mt-3 border-t border-gray-200 pt-2">
+      <button
+        type="button"
+        onClick={() => setOpen((current) => !current)}
+        className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left transition-colors hover:bg-gray-50"
+      >
+        <span>
+          <span className="block text-sm font-bold">Remaining Credit</span>
+          <span className="mt-0.5 block text-xs font-medium text-gray-400">
+            {rows.length} payments · Tap to view
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-sm font-bold tabular-nums text-green-700">
+            {formatCurrency(remainingCredit)}
+          </span>
+          <LuChevronDown
+            className={`transition-transform ${open ? "rotate-180" : ""}`}
+          />
+        </span>
+      </button>
+
+      {open && (
+        <div>
+          <div className="grid grid-cols-[1fr_96px_96px] gap-2 px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
+            <span />
+            <span className="text-right">Original</span>
+            <span className="text-right">Remaining</span>
+          </div>
+          {rows.map((row, index) => (
+            <div
+              key={`${row.source}-${row.docno}-${index}`}
+              className="grid grid-cols-[1fr_96px_96px] items-start gap-2 px-3 py-3"
+            >
+              <p className="text-xs font-medium leading-relaxed text-gray-400">
+                {row.remarks || "No remarks"}
+              </p>
+              <p className="text-right text-xs font-bold tabular-nums text-gray-400">
+                {row.paidAmount != null ? formatCurrency(row.paidAmount) : "-"}
+              </p>
+              <p className="text-right text-xs font-bold tabular-nums">
+                {formatCurrency(Math.abs(row.amount))}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 

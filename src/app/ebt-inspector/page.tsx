@@ -159,7 +159,6 @@ export default function EbtInspectorPage() {
             <input
               value={bpcode}
               onChange={(e) => setBpcode(e.target.value)}
-              placeholder="UO-00080"
               className="border border-gray-300 bg-white px-3 py-2 text-sm text-black focus:border-black focus:outline-none"
             />
           </label>

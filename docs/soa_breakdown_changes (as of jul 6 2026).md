@@ -1024,7 +1024,61 @@ The adjustment is a wash; removing it consistently leaves `derivedCredit` identi
 | Keep adjustment | 939.37 | −4,081.77 | **5,021.14** |
 | Remove it from **both** sides | 0 | −5,021.14 | **5,021.14** |
 
-The −4,081.77 balance already includes the +939.37 debit, so you cannot drop it from fees only (that double-counts). Done consistently, `derivedCredit` stays **5,021.14**. **The adjustment is a red herring for the amount — it is not why nothing shows.**
+Done consistently on **both** sides (the gross interpretation, treating the reversed payment as genuine credit), `derivedCredit` stays **5,021.14**. **The adjustment is a red herring for whether anything shows — it is not why nothing appears.**
+
+> **Correction (see Finding 2c):** the parenthetical claim once here — that dropping the adjustment from fees *only* "double-counts" — is **wrong**. The ledger already nets the reversed payment (`ACR0564114` credit) against its reversal (`OT-24-04-00009` debit) to zero, so the −4,081.77 does **not** carry a live +939.37. Dropping the dead invoice from the balance alone is legitimate and yields the **correct net** derivedCredit of 4,081.77. It still doesn't surface the advances, but for a different reason (stale candidates) — detailed below.
+
+### Finding 2b — empirical test: excluding ADJUSTMENT rows does NOT surface the advances
+
+Finance (interview) proposed that any arinvoice whose remarks match `/\badjustments?\b/i` should be dropped from the reconciliation, on the theory it is corrupting the math. Tested against **live** UO-00934 LR data by replaying the exact algorithm three ways:
+
+| Treatment | sumFees | ledgerBal | derivedCredit | candidateSum | mode | displayed |
+|---|---|---|---|---|---|---|
+| Current (adjustment counted) | 939.37 | −4,081.77 | 5,021.14 | 10,150.92 | `aggregate_only` | **nothing** |
+| Drop adjustment from fees only | 0 | −4,081.77 | 4,081.77 | 10,150.92 | `aggregate_only` | **nothing** |
+| Drop adjustment from both sides | 0 | −5,021.14 | 5,021.14 | 10,150.92 | `aggregate_only` | **nothing** |
+
+**Result: no change in outcome.** Only **one** adjustment row exists in the entire 219-row ledger (the same `OT-24-04-00009`, debit 939.37), so excluding it can move `derivedCredit` by at most 939.37. But `candidateSum` (10,150.92) sits **~5,130–6,070 above** `derivedCredit` in every treatment, so `candidateSum > derivedCredit` always routes to `aggregate_only` and displays nothing. The adjustment exclusion is confirmed a **dead end** for this bug — it changes the figure slightly but not the hide.
+
+**Corollary (per-row ledger truth is broken by shared credit memos).** Enriching each downpayment against the ledger shows the credit memos are over-counted — `CM-25-12-14655` is charged against **three** different advances, `CM-25-10-12459` against two — so the ledger declares every advance *except* the ₱200 (`ACR654632-2S`) fully exhausted, while the account net balance is still **−4,081.77 in credit**:
+
+| downpayment | EBT says unapplied | ledger paymentNet | credit-memos charged | ledger verdict |
+|---|---|---|---|---|
+| ACR0534441 | 3,217.60 | 4,000.00 | 10,133.57 | exhausted |
+| ACR0544409 | 3,899.00 | 4,000.00 | 8,543.73 | exhausted |
+| ACR0621965 | 2,134.42 | 2,134.42 | 4,808.78 | exhausted |
+| ACR654632-2S | 200.00 | 200.00 | 0.00 | **floating 200** |
+| ACR573509-F | 699.90 | 16,437.50 | 16,437.50 | exhausted |
+
+The real credit (₱4,081.77) exists at the account level but cannot be pinned to any specific ACR — the shared-CM over-count destroys per-row attribution. This is why neither "trust EBT" (overstates, 10,150.92) nor "trust ledger per-row" (understates, 200) is correct, and only the **aggregate synthetic row** (solution 1) surfaces the right number.
+
+### Finding 2c — excluding the adjustment from the BALANCE ONLY: corrects `derivedCredit`, still doesn't reconcile
+
+A subtler variant, prompted by the question: *"is this just finance failing to clear the reversed payment off the balance table?"* Here the adjustment is dropped from the **balance table only**, leaving the ledger fully intact (unlike Finding 2b's symmetric both-sides removal).
+
+First, the ledger facts (`ACR0564114` and `OT-24-04-00009` traced live):
+
+```
+row 51  03/05/2024  ACR0564114     INCOMINGPAYMENT  credit 939.37   ← payment received
+row 58  04/01/2024  OT-24-04-00009 ARINVOICE        debit  939.37   ← reversal ("Adjustment to ACR0564114")
+```
+
+Both sit mid-ledger and **cancel** — net **zero** contribution to the final running balance of −4,081.77. So the −4,081.77 does **not** contain a live +939.37; the adjustment already consumed itself canceling its own payment inside the ledger. The only place the 939.37 still lingers as a *live* item is the **balance table**, as a stale open arinvoice.
+
+Replaying the algorithm with `OT-24-04-00009` removed from the balance (ledger untouched):
+
+| Treatment | sumFees | ledgerBal | derivedCredit | candidateSum | closest subset | mode | displayed |
+|---|---|---|---|---|---|---|---|
+| Current (OT on balance) | 939.37 | −4,081.77 | 5,021.14 | 10,150.92 | 4,798.90 (off 222.24) | `aggregate_only` | **nothing** |
+| **OT removed from balance only** | 0 | −4,081.77 | **4,081.77** | 10,150.92 | 4,099.00 (off 17.23) | `aggregate_only` | **nothing** |
+
+**Two conclusions:**
+
+1. **The lingering OT invoice is a genuine finance data-hygiene defect, and clearing it is legitimate.** Removing it from the balance alone does **not** double-count (the ledger already nets the reversal), and it moves `derivedCredit` from the overstated 5,021.14 to **4,081.77 — exactly the headline net credit.** This is the *more correct* trusted total. It also settles the **net-vs-gross** question (open Q2 / solutions §1): the reversed ₱939.37 is not floating credit, so **net 4,081.77 is the right figure**, and the reversed payment should simply be written off the open-items list.
+
+2. **But it still does not surface the advances.** Even at the correct 4,081.77, no subset of the stale downpayment remainings `{3,217.60, 3,899.00, 2,134.42, 200.00, 699.90}` sums to it — closest is 4,099.00 (`ACR0544409 + ACR654632-2S`), off ₱17.23, outside tolerance. Mode stays `aggregate_only`; nothing shows.
+
+**Verdict:** clearing the reversed payment off the balance is worth doing for accuracy (correct, net-consistent `derivedCredit`), but it is **not** the fix for the disappearing-advance bug. The stale, unreconcilable downpayment remainings (Finding 3) are the real blocker either way.
 
 ## Finding 3 — the real blocker: EBT downpayment remainings are stale and unreconcilable
 
@@ -1052,6 +1106,33 @@ Attempted to recompute each downpayment's real remaining by allocating credit-me
 | ACR573509-F | 16,437.50 | 16,437.50 | 0.00 | 8,218.75 |
 
 **Conclusion:** which specific advance holds the ₱5,021.14 cannot be determined from this data. Only the **aggregate** is trustworthy.
+
+### Finding 4b — finance-confirmed phantom (ACR0534441): pruning it does NOT reconcile the unit
+
+Finance (later interview) confirmed that **`ACR0534441` is fully applied in the ledger and should not surface** — i.e. it is a phantom, exactly what the reconciler already suspects. Two things were tested: (a) is the claim true, and (b) does removing it let the remaining water advances surface.
+
+**(a) The phantom claim is correct — verified from its refdocs.** `ACR0534441` (₱4,000 paid) is referenced by four credit memos, one of which is **solely** its own:
+
+| Credit memo | credit | shared with | 
+|---|---|---|
+| CM-24-02-02056 | 1,654.66 | **sole (ACR0534441 only)** |
+| CM-23-10-02625 | 3,665.29 | ACR0495696 |
+| CM-24-01-00565 | 3,930.22 | ACR0532287 |
+| CM-25-10-12459 | 883.40 | ACR0544409 |
+
+Every allocation exceeds the ₱4,000 paid — naive-full **10,133.57**, fair all-payment split **5,894.11**, and even the sole memo alone (1,654.66) already beats EBT's implied "applied" of 782.40. The row is unambiguously consumed; its EBT `dueamount` of 3,217.60 is 100% stale. **Finance is right.**
+
+**(b) Removing the phantom does not surface the rest.** Replayed with `ACR0534441` dropped from the candidate list, against both derivedCredit targets (adjustment kept = 5,021.14; adjustment removed from balance = 4,081.77):
+
+| Candidate set | candidateSum | vs 5,021.14 | vs 4,081.77 | mode |
+|---|---|---|---|---|
+| All 5 rows | 10,150.92 | no (closest 4,798.90) | no (closest 4,099.00) | `aggregate_only` |
+| **Remove ACR0534441** | 6,933.32 | no (closest 4,798.90) | no (closest 4,099.00) | `aggregate_only` |
+| Remove ACR0534441 + ACR0544409 | 3,034.32 | no | no (now *below* target) | `aggregate_only` |
+
+The closest subsets (4,798.90 / 4,099.00) **never contained `ACR0534441`**, so removing it is a no-op for the match. Worse, pruning eventually pushes `candidateSum` *below* `derivedCredit`, flipping the failure from "overstated" to "shortfall" — still `aggregate_only`, still nothing shown.
+
+**Why pruning can't win.** The floating credit is not cleanly located in these rows. By fair (all-payment) credit-memo split, the *true* remaining is: `ACR0534441` **0** (phantom ✓), `ACR0544409` 0, `ACR0621965` 0, `ACR654632-2S` 200, `ACR573509-F` **8,218.75** (indeterminate — its single memo `CM-25-12-13218` is shared with `ACR573509-E`). Total true remaining ranges from **200** (naive) to **8,418.75** (all-split) depending on how shared memos are allocated — and **no** consistent allocation lands on the ~4,081.77 the account actually holds. Confirming one phantom is correct data hygiene, but the remaining rows are individually indeterminate, so the aggregate credit still cannot be attributed to specific rows. This **reinforces Finding 4**: only the aggregate is trustworthy; the fix is the synthetic aggregate line (solution 1), not row-pruning.
 
 ## Why this is different from Changes 6 and 7
 
@@ -1098,32 +1179,157 @@ SOA Breakdown → UO-00934 / LR → Payments tab   (observe "No uncredited payme
 
 ---
 
+## Second reproduction case: UO-01166 LR
+
+Same *symptom* as UO-00934 (`aggregate_only` → nothing shown), but the **root cause is different and, crucially, fixable at source**. This is **not** a reconciliation-design limitation. A resident's installment check bounced, was re-entered under a new docno, but the bounced credit was **never reversed in the ledger** — so the ledger running balance double-counts one installment. That inflates `derivedCredit` by exactly one installment (3,930.57) above the resident's true floating credit, which is why no whole-candidate subset can match. Correct the bounced-check entry upstream and the account reconciles perfectly with the standard subset method — **no app change needed**.
+
+### What the app shows
+
+- Outstanding Balance **₱29,413.98** (Dues & Others 28,954.82 + Electricity 459.16).
+- Outstanding Fees list: WA-25-08-07299 (46,463.76), AD-26-06-07289 (12,312.50), EC-26-06-07282 (985.00), SU-26-06-01681 (200.00), WA-26-06-05151 (438.12), EL-26-06-07385 (459.16). The two OT adjustment invoices are correctly hidden.
+- Payments tab: **nothing** — the seven "Water July 2025 Nth Installment" advance payments do not appear.
+
+### Raw EBT balance table (dues lane)
+
+| type | docno | dueamount | remarks |
+|---|---|---|---|
+| arinvoice | WA-25-08-07299 | 46,463.76 | Water Jul 2025 |
+| arinvoice | OT-25-11-01291 | 3,930.57 | ADJUSTMENT FOR JANUARY 2026 SOA (BC) |
+| arinvoice | OT-26-02-00013 | 3,930.57 | Adjustment April 2026 SOA |
+| arinvoice | AD-26-06-07289 | 12,312.50 | 07/2026 Assoc Dues |
+| arinvoice | EC-26-06-07282 | 985.00 | 07/2026 Equity |
+| arinvoice | SU-26-06-01681 | 200.00 | Vehicle RF Tag |
+| arinvoice | WA-26-06-05151 | 438.12 | Water May 2026 |
+| arcreditmemo | ARCM-25-11-03105 | −3,930.57 | ADJUSTMENT FOR JANUARY 2026 SOA (BC) |
+| arcreditmemo | ARCM-26-02-00067 | −3,930.57 | Adjustment April 2026 SOA |
+| downpayment | ACR0548519 | −11,323.63 | ASSOC DUES OCT'23 … & OVER (12/05/2023) |
+| downpayment | ACR646169-2SWA | −3,930.57 | Water July 2025 1st Installment |
+| downpayment | ACR647920-2S | −3,930.57 | Water July 2025 2nd Installment |
+| downpayment | ACR674726-2S | −3,930.57 | Water July 2025 3rd Installment |
+| downpayment | ACR680488-2S | −3,930.57 | Water July 2025 4th Installment |
+| downpayment | ACR688562-2S | −3,930.57 | Water July 2025 5th Installment |
+| downpayment | ACR693354-2S | −3,930.57 | Water July 2025 6th Installment |
+| downpayment | ACR699584-2S | −3,930.57 | Water July 2025 7th Installment |
+
+### Reconciliation inputs (dues lane)
+
+```
+sumOutstandingFees = arinvoice(68,260.52) + negative arcreditmemo(−7,861.14) = 60,399.38
+                     (the two OT adjustments +7,861.14 net exactly against the two ARCM −7,861.14)
+ledgerFinalBalance = 28,954.82        (last ledger running balance — INFLATED by a bounced credit, see below)
+derivedCredit      = 60,399.38 − 28,954.82 = 31,444.56   ← overstated by exactly one installment
+
+candidateSum       = 11,323.63 + 7 × 3,930.57 = 38,837.62
+```
+
+`derivedCredit` here is **wrong**, and predictably so: `31,444.56 = 8 × 3,930.57`, i.e. **eight** installments of floating credit — but the resident has only paid **seven**. The extra installment is the bounced check `ACR646169-2S`, whose credit is still sitting in the ledger running balance (see next section). The resident's *true* floating credit is `7 × 3,930.57 = 27,513.99`.
+
+`candidateSum (38,837.62) > derivedCredit (31,444.56)` → enters subset search over `{11,323.63, and seven of 3,930.57}`. No whole subset sums to the (overstated) 31,444.56: installments-only needs k = 8.0 but only 7 exist; `11,323.63 + 3,930.57·k = 31,444.56` gives k = 5.119 (non-integer). `subsetSum` null → greedy null → full-candidate `subsetSum` null → `aggregate_only` → `displayed: []`. **Nothing shown — because the target it was searching for was inflated by a bounced payment.**
+
+### Ledger evidence — what EBT got wrong
+
+Pulled `past-ledger` UO-01166 / LR (01/01/2023 → 07/07/2026):
+
+**1. ACR0548519 is a phantom — fully consumed in 2023–2024, yet EBT still reports 11,323.63 remaining.**
+
+```
+12/05/2023  ACR0548519  INCOMINGPAYMENT  credit 11,405.39   refdocs: 548519, ACR0559139
+12/05/2023  548519      CREDITMEMO       debit=credit 11,323.63  refdocs: WA-23-08-05019, AD-23-09-09619, WA-23-09-05464, ACR0548519
+02/20/2024  ACR0559139  INCOMINGPAYMENT  debit 81.76 …          refdocs: …, ACR0548519
+```
+
+CM 548519 allocated 11,323.63 of the payment to 2023 invoices; the remaining 81.76 was drawn by ACR0559139. Payment 11,405.39 = 11,323.63 + 81.76 → **fully consumed**. EBT's downpayment `dueamount` of 11,323.63 is 100% stale.
+
+**2. THE ROOT CAUSE — a bounced check was double-credited in the ledger and never reversed.**
+
+The resident's 1st installment check bounced. Finance re-entered it under a new docno (`…-2SWA`) with the corrected check details — necessary because docnos can't be reused. But the **original bounced credit was never reversed with an offsetting debit**, so the ledger now carries the 1st installment as **two** credits:
+
+```
+row 115  12/15/2025  ACR646169-2S    INCOMINGPAYMENT  credit 3,930.57  bal 43,853.72  ← bounced check, NOT reversed
+row 116  12/15/2025  ACR646169-2SWA  INCOMINGPAYMENT  credit 3,930.57  bal 39,923.15  ← the real re-entered payment
+```
+
+Both credits reduce the running balance. There is **no** debit anywhere in the ledger that claws back the bounced `ACR646169-2S`. (The two "(BC)" adjustment pairs — `OT-25-11-01291` debit + `ARCM-25-11-03105` credit, and the Feb 2026 pair — each net to **zero** on the running balance; they do **not** reverse the bounced payment.)
+
+Net effect: the ledger running balance (28,954.82) is **3,930.57 too low** — it credits one installment twice. That flows straight into `derivedCredit = 60,399.38 − 28,954.82 = 31,444.56`, overstating the true floating credit by exactly one installment.
+
+Correctly, the EBT downpayment list carries only the **seven real** installments (`-2SWA` = 1st … 7th); the bounced `ACR646169-2S` is *not* listed as a downpayment. So the candidate side is right (7 installments = 27,513.99) and the ledger-derived side is wrong (31,444.56). They can never reconcile while the bounce sits uncorrected.
+
+### The real fix (upstream, not in the app)
+
+Reverse the bounced check `ACR646169-2S` in the EBT ledger — post the offsetting **debit 3,930.57** that should have accompanied the bounce. That raises the running balance to `28,954.82 + 3,930.57 = 32,885.39`, giving:
+
+```
+derivedCredit = 60,399.38 − 32,885.39 = 27,513.99 = 7 × 3,930.57   ← the seven real installments, exactly
+```
+
+Then `active` (the seven non-exhausted installments) sums to 27,513.99 = `derivedCredit` → `mode: "subset"` → **all seven installments surface**, and the 2023 phantom `ACR0548519` (correctly flagged consumed) stays hidden. No app change required for this unit — it's a **data-entry defect at EBT**, and once the bounce is reversed the standard reconciliation handles it cleanly.
+
+*(The phantom `ACR0548519` remains an independent stale-EBT issue, but it does not block this unit: it is correctly detected as consumed and excluded from `active`, so it never needs to be matched.)*
+
+### Reproduction
+
+```
+EBT Inspector → UO-01166 / LR → Balance   (1 big water arinvoice + 2 OT adj + 2 ARCM + 8 downpayments; only 7 real installments listed)
+EBT Inspector → UO-01166 / LR → Ledger    (rows 115-116: ACR646169-2S bounced credit + ACR646169-2SWA real credit, both present, neither reversed; ACR0548519 consumed via CM 548519 + ACR0559139)
+SOA Breakdown → UO-01166 / LR → Payments  (observe no uncredited payments; derivedCredit meta = 31,444.56 = 8 installments, one more than paid → aggregate_only)
+```
+
+---
+
 ## Simplified Explanation
 
-This is the same bug as above, written in plain accounting terms — no code, no jargon. It has two parts: first, how the tool figures out a resident's advance payments today; then, what exactly goes wrong for unit UO-00934.
+This is the same bug as above, written in plain accounting terms — no code, no jargon. It walks through: how the tool figures out a resident's advance payments today (**Part A**); what goes wrong for two example units, **UO-00934** (**Part B**) and **UO-01166** (**Part C**); and the possible fixes (**Part D**).
 
 ### Part A — How the tool currently reconciles advance payments
 
-Think of each advance payment (a "down payment" / "ACR") like a **prepaid deposit jar**. A resident hands over money ahead of time, and each month the association takes that month's dues and equity out of the jar until it runs dry.
+Each advance payment (a "down payment" / "ACR") is a **credit the resident paid ahead of time**. As each month's dues, equity, and water charges fall due, the association **applies** part of that advance against them, until the advance is fully used up (fully applied).
 
-The EBT keeps a list of these jars and, next to each one, a number saying *"this much is still left in the jar."*
+The EBT keeps a list of these advance-payment **items** and, beside each one, an amount labeled *"still unapplied"* — how much of that advance it believes has not yet been used.
 
-**The catch:** that EBT "still left" number is often wrong — it is frequently **too high**. The EBT sometimes keeps showing money in a jar that was actually already spent months ago. If the tool simply trusted those numbers, it would tell residents they have far more advance credit than they really do.
+**The catch:** that "still unapplied" amount is often **overstated**. The EBT frequently keeps showing an advance as unapplied long after it was actually applied to charges. If the tool simply trusted those amounts, it would credit residents with far more advance than they truly have.
 
-**So the tool does not trust the jar labels. It cross-checks against the statement of account (the ledger).** In plain terms:
+**So the tool does not trust those item labels. It reconciles them against the statement of account (the ledger).** In plain terms:
 
-1. Add up everything the resident still genuinely **owes** today (the open charges).
-2. Look at the account's real running balance at the bottom of the ledger — this already reflects every payment and every charge that has actually been posted.
-3. The difference between those two tells the tool the **true total of advance money that is still sitting unused**, regardless of what the jar labels claim.
-4. Finally, the tool tries to point that true leftover amount back at specific jars, so it can show the resident "your remaining advance is this jar and that jar."
+1. Add up everything the resident still genuinely **owes** today (the open charges / open items).
+2. Take the account's real **running balance** at the bottom of the ledger — this already reflects every payment and every charge that has actually been posted.
+3. The difference between those two is the **true total advance still unapplied**, regardless of what the item labels claim.
+4. Finally, the tool tries to trace that true amount back to specific advance-payment items, so it can show the resident "your remaining advance is this item and that item."
 
 **A clean example (how it's supposed to work):**
 
-- EBT lists two jars: Jar A "₱5,000 left", Jar B "₱3,000 left" → labels say ₱8,000 total.
-- But the statement of account proves the resident only has **₱3,000** of advance money truly unused.
-- The tool concludes Jar A was actually already spent, shows **only Jar B (₱3,000)**, and hides Jar A. Correct result — the resident's real advance is ₱3,000, and it matches Jar B exactly.
+- EBT lists two advance items: Item A "₱5,000 unapplied", Item B "₱3,000 unapplied" → labels claim ₱8,000 total.
+- But the statement of account proves the resident only has **₱3,000** of advance truly unapplied.
+- The tool concludes Item A was already applied, shows **only Item B (₱3,000)**, and hides Item A. Correct result — the resident's real advance is ₱3,000, and it matches Item B exactly.
 
-That "matching back to a specific jar" step is the important one. It only works when the true leftover amount lines up with one jar, or with a clean combination of jars.
+**A real worked example — UO-00050 HR (a phantom caught correctly):**
+
+The EBT lists three advance-payment items for this resident:
+
+| Advance-payment item | EBT says still unapplied |
+|---|---|
+| ACR0543409 (Association Dues, Nov 2023) | 9,324.00 |
+| ACR683649-2S (Water & interest, Mar 2026) | 3,956.43 |
+| ACR701642-2S (Association Dues, Jun 2026) | 1,293.57 |
+| **EBT total** | **14,574.00** |
+
+Now the four steps:
+
+1. **What the resident still owes today (open charges).** 06/2026 Association Dues 5,250.00 + 07/2026 Association Dues 5,250.00 + 07/2026 Equity 420.00 = **₱10,920.00**. (The five 2023 "Reversed" water credit-memo lines are old reversal entries, not real charges or credits, so they are set aside.)
+
+2. **The real running balance at the bottom of the statement of account:** **₱5,670.00**.
+
+3. **True unapplied advance** = what they owe on paper − real balance = 10,920.00 − 5,670.00 = **₱5,250.00**. This is the real advance still sitting unused, whatever the item labels claim.
+
+4. **Trace it back to the items:**
+   - **ACR0543409** — EBT says 9,324.00 unapplied, but the statement shows this November 2023 payment was **already applied** back in November 2023, against the October and November 2023 dues. It is a **phantom**: fully used up, yet still sitting on the list. Its true unapplied amount is **₱0**.
+   - **ACR683649-2S** — truly **3,956.43** unapplied (statement agrees with the label).
+   - **ACR701642-2S** — truly **1,293.57** unapplied (statement agrees with the label).
+   - 3,956.43 + 1,293.57 = **₱5,250.00** — exactly the true total from Step 3.
+
+So the tool shows the two genuine advances (₱3,956.43 and ₱1,293.57) and **hides the ₱9,324.00 phantom** (ACR0543409). Correct result: the resident sees their real ₱5,250.00 advance, and the already-applied 2023 payment does not inflate it. This is the reconciliation working exactly as intended.
+
+That "tracing back to a specific item" step is the important one. It only works when the true unapplied amount lines up with one item, or with a clean combination of items — as in UO-00050 above. The two broken units further down (UO-00934, UO-01166) are exactly where that clean match is impossible.
 
 ### Part B — What goes wrong for UO-00934
 
@@ -1131,11 +1337,11 @@ This resident is actually **in credit** — the tool's headline correctly shows 
 
 Here is why, step by step:
 
-**1. The EBT jar labels are badly overstated.** The EBT lists five advance-payment jars and claims they still hold **₱10,150.92** in total. But the statement of account proves only about **₱5,021** of advance money is genuinely unused (and after one offset, the net figure is the ₱4,081.77 shown in the headline). So the EBT is overstating the leftover advances by roughly **₱5,130**.
+**1. The EBT item labels are badly overstated.** The EBT lists five advance-payment items and claims they are still **₱10,150.92** unapplied in total. But the statement of account proves only about **₱5,021** of advance is genuinely unapplied (and after one offset, the net figure is the ₱4,081.77 shown in the headline). So the EBT is overstating the unapplied advances by roughly **₱5,130**.
 
-**2. The true leftover doesn't line up with any of the jars.** The real unused advance (~₱5,021) does not equal any single jar, and it does not equal any clean combination of the five jars either. The amounts simply don't add up to it. The individual jars are:
+**2. The true leftover doesn't line up with any of the items.** The real unapplied advance (~₱5,021) does not equal any single advance-payment item, and it does not equal any clean combination of the five items either. The amounts simply don't add up to it. The individual items are:
 
-| Jar (advance payment) | EBT says still left |
+| Advance-payment item | EBT says still unapplied |
 |---|---|
 | ACR0534441 (Water advance, 2023) | 3,217.60 |
 | ACR0544409 (Water advance, 2023) | 3,899.00 |
@@ -1145,17 +1351,808 @@ Here is why, step by step:
 | **EBT total** | **10,150.92** |
 | **Statement of account says truly unused** | **~5,021.14** |
 
-No mix of those five figures adds up to ₱5,021.14. So the tool knows the *total* real advance, but it cannot say *which* jar (or jars) that money belongs to.
+No mix of those five figures adds up to ₱5,021.14. So the tool knows the *total* real advance, but it cannot say *which* item (or items) that money belongs to.
 
-**3. When the tool can't point to a specific jar, it currently shows nothing.** Because it can't confidently attach the ₱5,021 to a named jar, it plays it safe and displays "No uncredited payments." That safe choice is what hides the real advance and creates the complaint.
+**3. When the tool can't point to a specific item, it currently shows nothing.** Because it can't confidently attach the ₱5,021 to a named advance-payment item, it plays it safe and displays "No uncredited payments." That safe choice is what hides the real advance and creates the complaint.
 
-**4. Why the numbers can't be traced to a jar.** Normally we could re-derive each jar's real leftover from the statement. Here we can't, because the association's own records apply one credit memo against **several** jars at once, some records are missing their reference, and a few appear twice. When we try to work out how much each jar truly has left, the math comes out impossible (some jars would have *negative* money left). The bookkeeping is too tangled to split cleanly per jar.
+**4. Why the numbers can't be traced to an item.** Normally we could re-derive each item's real unapplied amount from the statement. Here we can't, because the association's own records apply one credit memo against **several** advance-payment items at once, some records are missing their reference, and a few appear twice. When we try to work out how much each item truly has left, the math comes out impossible (some items would show a *negative* unapplied amount). The bookkeeping is too tangled to split cleanly per item.
 
 **5. Side note — the one "charge" showing is not a real charge.** The single ₱939.37 open item labeled "Adjustment to ACR0564114" is actually a **reversed payment**: a ₱939.37 payment came in on 03/05/2024 and was taken back on 04/01/2024. It nets to zero and is not a new fee. It does **not** cause this bug — the missing-advance problem is exactly the same with or without it. It only matters for deciding the final displayed figure (see the question below).
 
-### What we need from finance
+**6. We tested removing the adjustment — it did not fix anything.** The finance team suggested that dropping any "Adjustment" row from the calculation might make the advances reappear. We tried exactly that on this resident's live data, three different ways. In every case the tool still showed nothing. The reason: there is only **one** adjustment row on the whole account (that ₱939.37), so removing it can only move the numbers by ₱939 at most — but the EBT's advance list (₱10,150.92) is overstated by roughly **₱5,130**, a gap far too big for a ₱939 change to close. So the resident's advance still can't be matched to the items, and the tool still stays silent. **The adjustment is a red herring; the real fix is one of the options below.**
+
+### Part C — What goes wrong for UO-01166
+
+This one looks like the same problem but has a **completely different, and fixable, cause** — a bounced check that was never properly reversed. This resident is paying off a large water charge of **₱46,463.76** (Water July 2025) in monthly installments of **₱3,930.57** each. They have paid **seven** installments, so their true advance credit is **7 × ₱3,930.57 = ₱27,513.99**. Yet the Payments tab shows **nothing**.
+
+Here is why, step by step:
+
+**1. A check bounced, and its credit was left in the account.** The resident's 1st installment was paid by a check that later bounced. Finance re-entered the payment under a new reference number (the "…-2SWA" one) with the corrected check details — normal practice, since a reference number can't be reused. **But the original bounced payment was never reversed.** So the account's ledger now records the 1st installment **twice**: once for the bounced check, once for the good one.
+
+**2. That double-count makes the account look like it has one extra installment.** Because the bounced payment is still credited, the statement of account reads as if the resident has **eight** installments of advance credit (₱31,444.56) when they really have **seven** (₱27,513.99). The tool trusts the statement, so it goes looking for eight installments' worth of advance money.
+
+**3. But the advance-payment list only has seven.** The EBT correctly lists only the seven **real** installments (the bounced one is not on the list). So the tool is trying to match an eight-installment total against a seven-installment list — it can never add up. No combination fits, so the tool plays safe and shows **"No uncredited payments,"** hiding all seven genuine installments.
+
+**The fix is at the source, not in the tool.** Finance needs to **reverse the bounced check** in the EBT ledger (post the offsetting entry that should have accompanied the bounce). The moment that's done, the statement drops back to the correct seven-installment total (₱27,513.99), which matches the list exactly — and all seven installments appear normally. **No change to the tool is required for this resident.**
+
+**The difference from UO-00934:** UO-00934 is a genuine reconciliation limit (the numbers truly can't be itemized). UO-01166 is **not** — it's a data-entry error at EBT (a bounce left uncorrected). Fix the ledger entry and it resolves itself.
+
+### Part D — Possible ways to fix it
+
+Ordered by our current preference. Each option only changes the stuck case (the resident truly has advance money, but it can't be traced to specific items); the cases that already work are left untouched.
+
+**Option 1 — Show one summary line (recommended).** When the tool knows the true advance total but can't tie it to specific items, show a single line — e.g. "Unapplied advance (unallocated)" — for that total, without naming a particular advance payment.
+- *Upside:* the resident always sees their real credit, and nothing is made up.
+- *Downside:* it's a lump sum, not itemized; the display needs a line that works without a document number.
+- *Which figure to show:* the **net ₱4,081.77** (matches the credit balance already on the headline) or the **gross ₱5,021.14** (the total advance before offsetting the one reversed payment). We suggest **net**, so the two figures agree.
+
+**Option 2 — Itemize by best guess, trimming the last item.** Show the most recent advances adding up to the true total, cutting the final item down to a partial amount so the total matches.
+- *Upside:* looks fully itemized.
+- *Downside:* the per-item amounts are **made up** — they won't match the EBT — and choosing which items to show is a guess. Risk of implying a specific advance is used (or unused) when we don't actually know.
+
+**Option 3 — Just trust the EBT labels.** List every advance at the EBT's "still unapplied" amount (total ₱10,150.92 here).
+- *Upside:* simplest; matches exactly what finance sees in the EBT payment screen.
+- *Downside:* **overstates** the resident's credit by ~₱5,130 in this case — this is precisely the overstatement the reconciliation was built to prevent, and it would break other units.
+
+**Option 4 — Leave it as-is.** Keep showing "No uncredited payments" whenever the advance can't be traced.
+- *Upside:* never shows a wrong itemization.
+- *Downside:* hides real credit — the very complaint being reported.
+
+---
+
+## In Summary: root causes of disappearing uncredited payments
+
+Every case where an uncredited (advance) payment vanishes from the app traces back to the **same core design decision**: the app does **not** trust the EBT's per-payment "still unapplied" figure (`dueamount`), because that figure is frequently wrong. Instead it derives the *true total* advance from the statement of account (`sumOutstandingFees − ledgerFinalBalance = derivedCredit`), then tries to **map that trusted total back onto specific EBT downpayment rows**. A payment disappears whenever that mapping fails. The failures come from seven distinct problems:
+
+1. **Stale / phantom EBT remainings (overstated).** The EBT keeps showing a payment as unapplied long after the ledger already applied it (via a credit memo). This inflates the candidate sum above the trusted total.
+   - *Seen in:* UO-00050 (ACR0543409, 9,324 phantom — **caught correctly**); UO-00934 (five overstated items); UO-01166 (ACR0548519, 11,323.63 phantom).
+
+2. **Missing floating payments (not surfaced at all).** A genuinely-unapplied payment exists in the ledger but is **absent from the EBT downpayment list**, so the tool has no row to point at even though the credit is real.
+   - *Status:* the one suspected case (UO-01166, `ACR646169-2S`) turned out **not** to be a missing floating payment — it is a **bounced check** left un-reversed in the ledger. See problem 7.
+
+3. **Whole-row-only selection — can't show a partial or invent a missing row.** The reconciler may only show or hide **entire** EBT rows. When the trusted total needs *part* of a row, or a row that isn't on the list, no clean combination lands on the target.
+   - *Seen in:* UO-00934 (no subset of the five items sums to the true total).
+
+4. **Shared credit memos over-counted (double attribution).** One credit memo referenced by several payments has its **full** amount attributed to **each** of them, so a still-floating payment looks fully applied and gets hidden.
+   - *Seen in:* Change 7 (fixed with a fallback, but the tangled allocation in EBT persists as the underlying cause).
+
+5. **Safe-default hides everything (`aggregate_only`).** When the trusted total can't be matched to specific rows, the tool currently shows **nothing** rather than an aggregate figure — so real credit disappears from the UI even though the headline balance already reflects it.
+   - *Seen in:* UO-00934 (ends here — a genuine reconciliation limit). UO-01166 also lands in this state, but only as a *downstream symptom* of problem 7; fixing the ledger entry resolves it without touching this default.
+
+6. **Upstream data quality — the real origin.** Problems 1–4 all reduce to one thing: the EBT's downpayment `dueamount` is **not kept in sync** with credit-memo allocations. It is not cleared when a payment is applied, sometimes omits a payment entirely, and lets one memo count against many payments. If the EBT maintained accurate per-payment remainings, `derivedCredit` and the candidate sum would agree and **none** of the reconciliation guesswork (and none of this hiding) would be needed.
+
+7. **Bounced/reversed payment left un-reversed in the ledger (inflates the trusted total).** When a check bounces and is re-entered under a new docno, the **original credit must be reversed with an offsetting debit**. If it isn't, the ledger double-counts that payment, and since the true credit is derived *from* the ledger balance (`sumOutstandingFees − ledgerFinalBalance`), `derivedCredit` is overstated by the un-reversed amount — pushing an otherwise-clean account into `aggregate_only`.
+   - *Seen in:* UO-01166 (`ACR646169-2S`, a bounced 1st-installment check still credited alongside its `-2SWA` replacement; inflates `derivedCredit` by exactly one 3,930.57 installment). **Fix:** reverse the bounced credit at EBT; the account then reconciles at 7 installments with no app change.
+
+**Single-sentence root cause:** the EBT's per-payment "still unapplied" figures are unreliable — stale, missing, or double-counted — and the app can only display **whole** EBT rows, so whenever the ledger-proven true credit cannot be expressed as a clean subset of those unreliable rows, the app hides the payments instead of surfacing the amount it already knows is there.
+
+**What's fixable where:**
+- *App-side (we control):* problem 5 — stop hiding; show the trusted aggregate when itemization fails (see Part D / Potential solutions). This makes the credit visible for the genuine-limit case (UO-00934).
+- *EBT-side (source data):* problems 1, 2, 4, 6, **7** — fixing the upstream data removes the mismatch at the root. Problem 7 (UO-01166's bounced check) is the clearest example: a single corrective ledger entry makes the account reconcile perfectly, no app change needed.
+
+---
+
+## What we would need from finance
 
 1. When we can prove a resident has advance money but **cannot tie it to a specific advance payment**, do you want the tool to show the **total unused advance as one summary line**, or is "No uncredited payments" acceptable in that situation?
 2. If we show a summary line, which figure is correct for your purposes — the **net ₱4,081.77** (matches the credit balance already on the headline) or the **gross ₱5,021.14** (total advance before offsetting the reversed payment)?
 3. Most important, root cause: **why does the EBT still show ₱10,150.92 of advances remaining when the account only truly has about ₱5,021 unused?** Are those old 2023 water advances really still open, or is the EBT simply not clearing them once they're spent? If the EBT records can be corrected at the source, this problem mostly goes away on its own.
 4. Is that reversed ₱939.37 (ACR0564114) still genuinely collectible from the resident, or should it be written off? Your answer decides the net-vs-gross figure above.
+
+---
+
+## Change 8: Balances tab + "Remaining Credit" collapsible (Jul 8, 2026)
+
+### Problem
+
+Uncredited (advance) payments lived in a separate **Payments** tab, fully expanded, disconnected from the outstanding fees they offset. Users had to switch tabs to see that a unit had unused advance credit against its balance. The **Fees** tab and **Payments** tab treated two halves of the same balance as unrelated screens.
+
+### Decision
+
+Merge the advance-payment data into the outstanding fees view and rename that tab **Balances**:
+
+- Rename the **Fees** tab to **Balances**.
+- Inside the same Outstanding Fees card, below the fee list, add a **collapsible** "Remaining Credit" section that renders the advance-payment rows (the data previously shown in the Payments tab as "Uncredited Payments").
+- **Collapsed by default** — a single tappable summary row separated from the fee list by a top border. Left: title + muted caption `{count} payments · Tap to view`. Right: the remaining-credit total (green, accent) + a chevron that rotates 180° on open.
+- **Expanded** — an inline table (pushes content down, not a modal): description column (no header, muted, wraps), `Original` and `Remaining` columns right-aligned. No row dividers; vertical padding only. The `Remaining` column's right edge lines up with the outstanding-fee amounts above it (shared `px-3` inset inside the same `-mx-2` container).
+- Pure client-side expand/collapse — no data refetch on toggle.
+- Remove the **See Past Fees** button (it becomes a future **History** tab — not implemented yet).
+- **Payments** tab left unchanged for now (still renders `UncreditedPayments`).
+- Fee-selection logic unchanged.
+
+### Data
+
+Same rows as before: `outstandingQuery.data.rows` filtered to `kind === "payment"` (`uncreditedPaymentRows`), passed into `OutstandingFees` as `creditRows`.
+
+- description = `row.remarks`
+- original = `row.paidAmount`
+- remaining = `Math.abs(row.amount)`
+- `remainingCredit` = `sum(Math.abs(row.amount))` over all credit rows — **computed, never hardcoded**.
+- `count` = number of credit rows.
+
+Money formatted via existing `formatCurrency` (`toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })`).
+
+### Example scenario
+
+1. User views a unit with outstanding fees and 4 advance payments.
+2. **Balances** tab: fee list, then a `Remaining Credit` row showing `665.59` (= 432.32 + 21.05 + 201.11 + 11.11) and `4 payments · Tap to view`.
+3. Taps the row → chevron rotates, inline table reveals the 4 records with `Original` / `Remaining` columns; the `Remaining` edge aligns with the fee amounts above.
+4. Taps again → collapses. No network request either way.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/OutstandingFees.tsx` | **Modify** — add `creditRows` prop + `RemainingCredit` collapsible sub-component; remove `onSeePast` / "See Past Fees" button |
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** — rename tab to "Balances", pass `creditRows={uncreditedPaymentRows}`, drop fee `onSeePast` |
+
+`UncreditedPayments.tsx` is untouched (still used by the Payments tab). Its `handleSeePast("payment")` wiring stays.
+
+### Implementation
+
+**`OutstandingFees.tsx`** — new prop, drop `onSeePast`:
+
+```ts
+type OutstandingFeesProps = {
+  rows: ResidentBreakdownRow[];
+  creditRows: ResidentBreakdownRow[]; // advance/uncredited payment rows
+  // ...existing props, no onSeePast
+};
+```
+
+Render below the fee list, inside the same `<section>`:
+
+```tsx
+{!isLoading && !isError && creditRows.length > 0 && (
+  <RemainingCredit rows={creditRows} />
+)}
+```
+
+`RemainingCredit` sub-component:
+
+```tsx
+function RemainingCredit({ rows }: { rows: ResidentBreakdownRow[] }) {
+  const [open, setOpen] = useState(false);
+  const remainingCredit = rows.reduce((sum, row) => sum + Math.abs(row.amount), 0);
+
+  return (
+    <div className="-mx-2 mt-3 border-t border-gray-200 pt-2">
+      <button type="button" onClick={() => setOpen((c) => !c)}
+        className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left hover:bg-gray-50">
+        <span>
+          <span className="block text-sm font-bold">Remaining Credit</span>
+          <span className="mt-0.5 block text-xs font-medium text-gray-400">
+            {rows.length} payments · Tap to view
+          </span>
+        </span>
+        <span className="flex shrink-0 items-center gap-2">
+          <span className="text-sm font-bold tabular-nums text-green-700">
+            {formatCurrency(remainingCredit)}
+          </span>
+          <LuChevronDown className={`transition-transform ${open ? "rotate-180" : ""}`} />
+        </span>
+      </button>
+
+      {open && (
+        <div>
+          {/* header: no description header, Original + Remaining right-aligned */}
+          <div className="grid grid-cols-[1fr_96px_96px] gap-2 px-3 pb-2 ...">
+            <span />
+            <span className="text-right">Original</span>
+            <span className="text-right">Remaining</span>
+          </div>
+          {rows.map((row, index) => (
+            <div key={`${row.source}-${row.docno}-${index}`}
+              className="grid grid-cols-[1fr_96px_96px] items-start gap-2 px-3 py-3">
+              <p className="... text-gray-400">{row.remarks || "No remarks"}</p>
+              <p className="text-right ... text-gray-400">
+                {row.paidAmount != null ? formatCurrency(row.paidAmount) : "-"}
+              </p>
+              <p className="text-right ...">{formatCurrency(Math.abs(row.amount))}</p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+Alignment note: both the fee-amount column and the credit table sit inside a `-mx-2` container with `px-3` rows, so the right edges coincide regardless of the fixed `96px` credit column widths.
+
+**`ResidentBreakdownRequest.tsx`:**
+
+```tsx
+<TabButton selected={view === "fee"} onClick={() => setView("fee")}>
+  Balances
+</TabButton>
+
+<OutstandingFees
+  rows={filteredRows}
+  creditRows={uncreditedPaymentRows}
+  // ...existing props, no onSeePast
+/>
+```
+
+No backend changes.
+
+### Deferred (not in this change)
+
+- ~~**History** tab (replaces the removed "See Past Fees" / "See Past Payments" buttons).~~ **Done — see Jul 8 changes below.**
+- ~~Reworking / removing the standalone **Payments** tab.~~ **Done — Balances/Payments tabs removed; see Jul 8 changes below.**
+- Credit rows are passed **unsorted**; the old Payments-tab block sorted by date. Add sorting here if finance wants chronological order.
+
+---
+---
+
+# UI Overhaul: History page + SOA Breakdown layout changes (Jul 8, 2026)
+
+Four frontend-only changes made together. No backend changes. These resolve the deferred items from earlier ("History tab" and "removing the standalone Payments tab").
+
+## Summary (Jul 8)
+
+| # | Change | Layer | Scope |
+|---|--------|-------|-------|
+| 8 | Unified History page with Fees/Payments tabs | UI (new route + component) | New `/soa-breakdown/history` route |
+| 9 | Split + History icon buttons on SOA breakdown page | UI | `ResidentBreakdownRequest` header |
+| 10 | CategoryPills moved inside OutstandingFees box | UI | `OutstandingFees` component |
+| 11 | Remove Balances/Payments tab pills + UncreditedPayments section | UI | `ResidentBreakdownRequest` |
+
+---
+
+## Change 8: Unified History page with Fees/Payments tab switcher
+
+### Problem
+
+Fee History and Payment History were previously accessed via separate navigations (`/soa-breakdown/results?kind=fee` and `?kind=payment`). The `kind` was controlled by a URL search param, and the page title was generic "SOA History" with no tab UI for switching between the two.
+
+### Decision
+
+Create a single **History** page at `/soa-breakdown/history` with an internal **Fees / Payments** pill-tab switcher. The tab state is managed via `useState` (not URL params). Advanced options (custom date range, category pills for fees) are behind a collapsible "Advanced Options" section.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/ResidentBreakdownHistory.tsx` | **Create** |
+| `src/app/soa-breakdown/history/page.tsx` | **Create** |
+| `src/components/billing/breakdowns/ResidentBreakdownResults.tsx` | **Delete** (replaced) |
+| `src/app/soa-breakdown/results/page.tsx` | **Delete** (replaced) |
+
+### Implementation
+
+**New `ResidentBreakdownHistory.tsx`** — replaces `ResidentBreakdownResults.tsx`. Full source of truth:
+
+```tsx
+"use client";
+
+import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import Link from "next/link";
+import { LuChevronLeft, LuSlidersHorizontal } from "react-icons/lu";
+import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import {
+  filterRowsByCategories,
+  type FeeCategoryId,
+} from "@/lib/utils/fee-categories";
+import { PastFees } from "@/components/billing/breakdowns/PastFees";
+import { PastPayments } from "@/components/billing/breakdowns/PastPayments";
+import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
+import {
+  dateFromMonthRange,
+  dateFromRange,
+} from "@/lib/utils/breakdown-date-utils";
+import { formatCurrency } from "@/lib/utils/breakdown-format-utils";
+import type {
+  ResidentDateRange,
+  ResidentLedgerResponse,
+} from "@/lib/schema/resident-breakdown.schema";
+```
+
+Key architectural differences from the old `ResidentBreakdownResults`:
+
+1. **Tab state is internal** (`useState<"fee" | "payment">("fee")`), not from `useSearchParams().get("kind")`.
+2. **Advanced Options section** is collapsible (closed by default) with `LuSlidersHorizontal` icon toggle:
+   - Fee tab: shows `CategoryPills` + custom month range picker + "Apply Custom Range" button.
+   - Payment tab: shows only the custom month range picker (no CategoryPills).
+3. **Header**: Back chevron (`LuChevronLeft`) linking to `/soa-breakdown` + "History" title. No close (X) button in this repo (that is two-serendra-superapp only).
+4. **No info banner** in this repo (superapp-only feature).
+5. **Tab switcher**: pill-in-track design — two buttons inside a `rounded-full bg-gray-100 p-1` container; active tab gets `bg-black text-white`.
+6. Reuses `PastFees` and `PastPayments` components unchanged.
+7. Reuses `fetchPastLedger`, `RANGE_OPTIONS`, `MONTH_OPTIONS`, `defaultMonthSelection`, `MonthYearSelect` — all moved from the deleted `ResidentBreakdownResults`.
+
+**Tab switcher markup:**
+
+```tsx
+<div className="flex rounded-full bg-gray-100 p-1">
+  <button
+    type="button"
+    onClick={() => setActiveTab("fee")}
+    className={`flex-1 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+      activeTab === "fee"
+        ? "bg-black text-white"
+        : "text-gray-500 hover:text-gray-700"
+    }`}
+  >
+    Fees
+  </button>
+  <button
+    type="button"
+    onClick={() => setActiveTab("payment")}
+    className={`flex-1 rounded-full px-4 py-2 text-sm font-bold transition-colors ${
+      activeTab === "payment"
+        ? "bg-black text-white"
+        : "text-gray-500 hover:text-gray-700"
+    }`}
+  >
+    Payments
+  </button>
+</div>
+```
+
+**Advanced Options (collapsible) markup:**
+
+```tsx
+<section>
+  <button
+    type="button"
+    onClick={() => setAdvancedOpen((c) => !c)}
+    className="flex w-full items-center justify-between"
+  >
+    <span className="text-sm font-bold text-gray-700">
+      Advanced Options
+    </span>
+    <LuSlidersHorizontal
+      className={`text-lg text-gray-400 transition-transform ${
+        advancedOpen ? "rotate-90" : ""
+      }`}
+    />
+  </button>
+
+  {advancedOpen && (
+    <div className="mt-4 space-y-4 border border-gray-200 bg-gray-50 p-4">
+      {/* CategoryPills only on fee tab */}
+      {!isPayment && (
+        <CategoryPills
+          selectedCategories={selectedCategories}
+          onChange={setSelectedCategories}
+        />
+      )}
+      {/* Custom month range picker (both tabs) */}
+      <div>
+        <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">
+          Custom Range
+        </h3>
+        {/* MonthYearSelect Start + End + Apply button — same as old ResidentBreakdownResults */}
+      </div>
+    </div>
+  )}
+</section>
+```
+
+**New route page** (`src/app/soa-breakdown/history/page.tsx`):
+
+```tsx
+"use client";
+
+import { Suspense } from "react";
+import TabNav from "@/components/TabNav";
+import { ResidentBreakdownHistory } from "@/components/billing/breakdowns/ResidentBreakdownHistory";
+import { SoaBreakdownCredentialsForm } from "@/components/billing/breakdowns/SoaBreakdownCredentialsForm";
+import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
+
+export default function SoaBreakdownHistoryPage() {
+  const { showBreakdown } = useSoaBreakdownCredentials();
+
+  return (
+    <main className="mx-auto max-w-3xl px-6 py-12">
+      <TabNav />
+      <header className="mb-10 border-b border-gray-200 pb-6">
+        <h1 className="text-2xl font-bold tracking-tight">SOA History</h1>
+      </header>
+      <div className="space-y-8">
+        <SoaBreakdownCredentialsForm />
+        {showBreakdown && (
+          <Suspense
+            fallback={<p className="text-sm text-gray-500">Loading history...</p>}
+          >
+            <ResidentBreakdownHistory />
+          </Suspense>
+        )}
+      </div>
+    </main>
+  );
+}
+```
+
+Uses the existing `SoaBreakdownCredentialProvider` from the parent layout (`/soa-breakdown/layout.tsx`, unchanged).
+
+### Deleted files
+
+- `src/components/billing/breakdowns/ResidentBreakdownResults.tsx` — fully replaced by `ResidentBreakdownHistory.tsx`.
+- `src/app/soa-breakdown/results/page.tsx` — route replaced by `/soa-breakdown/history/page.tsx`.
+
+### Route change
+
+| Old route | New route |
+|-----------|-----------|
+| `/soa-breakdown/results?kind=fee` | `/soa-breakdown/history` (Fees tab active by default) |
+| `/soa-breakdown/results?kind=payment` | `/soa-breakdown/history` (switch to Payments tab) |
+
+**For two-serendra-superapp:** the superapp should also add:
+- A **dismissible info banner** at the top of the History page: "Transactions may take some time to properly reflect in the system. For questions, please contact or visit the Finance Office for details." with an X close button. Use `useState(true)` for visibility.
+- A **close (X) button** in the header (top-right), navigating back to the breakdown/home screen.
+
+---
+
+## Change 9: Split + History icon buttons on SOA Breakdown main page
+
+### Problem
+
+Previously, the SOA breakdown page header had a single button: "Show Split" / "Hide Split" (with `LuReceiptText` icon and text label). There was no direct way to access the History page from the main breakdown screen — users had to navigate via "See Past Fees" or "See Past Payments" links buried in the Payments tab and OutstandingFees section.
+
+### Decision
+
+Replace the single button with **two elements**, right-aligned to the balance amount:
+
+- **Chevron icon** (`LuChevronDown`) — toggles the balance split panel (existing behavior). Grouped beside the balance amount. The chevron rotates (`rotate-180`) when the split is open. `aria-label="Split"`.
+- **History link** — a text link saying "History", placed on the far right.
+
+The Split chevron is `text-xl` size with no text label. Both elements use `text-green-700 hover:text-green-900`.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** |
+
+### Implementation
+
+**Imports changed:**
+
+```diff
+-import { useRouter } from "next/navigation";
+-import { LuReceiptText } from "react-icons/lu";
++import Link from "next/link";
++import { LuChevronDown } from "react-icons/lu";
+```
+
+**Removed:** `useRouter` import, `handleSeePast` function, `BreakdownView` type.
+
+**Button markup** (replaces old single button):
+
+```tsx
+{/* Note: the wrapper div has items-center to align everything with the balance */}
+<div className="mt-2 flex items-center justify-between gap-4">
+  <div className="flex items-center gap-3">
+    {outstandingQuery.isLoading ? (
+      <div className="h-11 w-40 animate-pulse bg-gray-100" />
+    ) : (
+      <p className="text-4xl font-bold leading-none text-green-700">
+        ₱ {formatBalanceDisplay(meta?.balance)}
+      </p>
+    )}
+    {!outstandingQuery.isLoading && !outstandingQuery.isError && (
+      <button
+        type="button"
+        onClick={() => setShowDetails((current) => !current)}
+        className="text-green-700 hover:text-green-900"
+        aria-label="Split"
+      >
+        <LuChevronDown
+          className={`text-xl transition-transform ${
+            showDetails ? "rotate-180" : ""
+          }`}
+        />
+      </button>
+    )}
+  </div>
+  {!outstandingQuery.isLoading && !outstandingQuery.isError && (
+    <Link
+      href="/soa-breakdown/history"
+      className="mr-[21px] text-sm font-semibold text-green-700 hover:text-green-900"
+    >
+      History
+    </Link>
+  )}
+</div>
+```
+
+---
+
+## Change 10: CategoryPills moved inside OutstandingFees box
+
+### Problem
+
+CategoryPills was rendered **outside** the OutstandingFees card, between the old tab pills and the fees list. This was a layout artifact from having Balances/Payments tabs.
+
+### Decision
+
+Move CategoryPills **inside** the OutstandingFees card, rendered directly below the "Outstanding Fees" heading and the "Select All" button. This matches the screenshot design where categories are contextually grouped with the fees they filter.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/OutstandingFees.tsx` | **Modify** — add category props, import and render `CategoryPills` inside the card |
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** — remove standalone `<CategoryPills>` render, pass category props to `<OutstandingFees>` |
+
+### Implementation
+
+**`OutstandingFees.tsx`** — new imports and props:
+
+```tsx
+import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import type { FeeCategoryId } from "@/lib/utils/fee-categories";
+
+type OutstandingFeesProps = {
+  rows: ResidentBreakdownRow[];
+  creditRows: ResidentBreakdownRow[];
+  isLoading: boolean;
+  isError: boolean;
+  onRetry: () => void;
+  selectedRowIds: Set<string>;
+  onToggleRow: (id: string) => void;
+  onToggleSelectAll: () => void;
+  selectedCategories: Set<FeeCategoryId>;        // NEW
+  onCategoryChange: (next: Set<FeeCategoryId>) => void;  // NEW
+};
+```
+
+CategoryPills rendered inside the `<section>`, after the heading div, before the row list:
+
+```tsx
+<div className="mb-4">
+  <CategoryPills
+    selectedCategories={selectedCategories}
+    onChange={onCategoryChange}
+  />
+</div>
+```
+
+**`ResidentBreakdownRequest.tsx`** — removed standalone `<CategoryPills>` block and the `CategoryPills` import. Now passes the props through to `<OutstandingFees>`:
+
+```tsx
+<OutstandingFees
+  rows={filteredRows}
+  creditRows={uncreditedPaymentRows}
+  isLoading={outstandingQuery.isLoading}
+  isError={outstandingQuery.isError}
+  onRetry={() => outstandingQuery.refetch()}
+  selectedRowIds={selectedRowIds}
+  onToggleRow={toggleRow}
+  onToggleSelectAll={toggleSelectAll}
+  selectedCategories={selectedCategories}
+  onCategoryChange={setSelectedCategories}
+/>
+```
+
+---
+
+## Change 11: Remove Balances/Payments tab pills + UncreditedPayments section
+
+### Problem
+
+The SOA breakdown main page had `Balances | Payments` tab pills that toggled between the OutstandingFees view and UncreditedPayments view. With the History button now providing access to full payment history, and the Remaining Credit section inside OutstandingFees already showing uncredited/advance payments inline, the separate UncreditedPayments section and the tab pills are redundant.
+
+### Decision
+
+1. **Remove** the `Balances | Payments` tab pill buttons entirely.
+2. **Remove** the `<UncreditedPayments>` section from the main breakdown page.
+3. **Remove** the `UncreditedPayments` import from `ResidentBreakdownRequest`.
+4. Show `<OutstandingFees>` **always** (no conditional rendering based on tab state).
+5. Show the "Select Fees" button **always** (no `view === "fee"` guard).
+6. **Remove** the `view` state variable (`useState<BreakdownView>`) and `BreakdownView` type.
+7. **Remove** the `TabButton` local component.
+
+### Files affected
+
+| File | Action |
+|------|--------|
+| `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` | **Modify** — remove tabs, UncreditedPayments, view state, TabButton |
+| `src/components/billing/breakdowns/UncreditedPayments.tsx` | **No longer imported** from the main page (file still exists for potential future use) |
+
+### Implementation
+
+**Removed from `ResidentBreakdownRequest.tsx`:**
+
+```diff
+-import { UncreditedPayments } from "@/components/billing/breakdowns/UncreditedPayments";
+
+-type BreakdownView = "fee" | "payment";
+
+-const [view, setView] = useState<BreakdownView>("fee");
+
+-<div className="grid grid-cols-2 gap-3">
+-  <TabButton selected={view === "fee"} onClick={() => setView("fee")}>
+-    Balances
+-  </TabButton>
+-  <TabButton
+-    selected={view === "payment"}
+-    onClick={() => setView("payment")}
+-  >
+-    Payments
+-  </TabButton>
+-</div>
+
+-{view === "fee" && ( <CategoryPills ... /> )}
+
+-{view === "fee" ? ( <OutstandingFees ... /> ) : ( <UncreditedPayments ... /> )}
+
+-{view === "fee" && ( <button>Select Fees</button> )}
+
+-function TabButton({ ... }) { ... }
+```
+
+**Replaced with** (flat, no tabs):
+
+```tsx
+<OutstandingFees
+  rows={filteredRows}
+  creditRows={uncreditedPaymentRows}
+  isLoading={outstandingQuery.isLoading}
+  isError={outstandingQuery.isError}
+  onRetry={() => outstandingQuery.refetch()}
+  selectedRowIds={selectedRowIds}
+  onToggleRow={toggleRow}
+  onToggleSelectAll={toggleSelectAll}
+  selectedCategories={selectedCategories}
+  onCategoryChange={setSelectedCategories}
+/>
+
+<button
+  type="button"
+  disabled={selectedRowIds.size === 0}
+  className={`w-full py-3 text-sm font-bold uppercase tracking-widest transition-colors ${
+    selectedRowIds.size > 0
+      ? "bg-green-700 text-white hover:bg-green-800"
+      : "cursor-not-allowed bg-gray-100 text-gray-300"
+  }`}
+>
+  {selectedRowIds.size > 0
+    ? `Selected ₱${formatCurrency(selectedSum)}`
+    : "Select Fees"}
+</button>
+```
+
+Note: `uncreditedPaymentRows` is still computed and passed as `creditRows` to `OutstandingFees` — the **Remaining Credit** collapsible section inside `OutstandingFees` uses these rows. The standalone `UncreditedPayments` section was the only thing removed.
+
+### UncreditedPayments.tsx — previous changes to note
+
+In an earlier step during this session, `UncreditedPayments.tsx` was also modified to **remove the `onSeePast` prop** and the "See Past Payments" button. The current state of this file:
+
+- `onSeePast` prop: **removed**
+- "See Past Payments" button: **removed**
+- Header simplified to just title + subtitle (no action button)
+- File still exists but is **no longer imported** by `ResidentBreakdownRequest`
+
+---
+
+## Complete file inventory (Jul 8 changes)
+
+### New files
+
+```
+src/components/billing/breakdowns/ResidentBreakdownHistory.tsx
+src/app/soa-breakdown/history/page.tsx
+```
+
+### Deleted files
+
+```
+src/components/billing/breakdowns/ResidentBreakdownResults.tsx
+src/app/soa-breakdown/results/page.tsx
+```
+
+### Modified files
+
+```
+src/components/billing/breakdowns/ResidentBreakdownRequest.tsx
+src/components/billing/breakdowns/OutstandingFees.tsx
+src/components/billing/breakdowns/UncreditedPayments.tsx
+```
+
+### Unchanged but required by these changes
+
+```
+src/components/billing/breakdowns/CategoryPills.tsx          — unchanged, now rendered by OutstandingFees instead of ResidentBreakdownRequest
+src/components/billing/breakdowns/PastFees.tsx               — unchanged, used by ResidentBreakdownHistory
+src/components/billing/breakdowns/PastPayments.tsx           — unchanged, used by ResidentBreakdownHistory
+src/components/billing/breakdowns/InspectedUnitLabel.tsx     — unchanged
+src/components/billing/breakdowns/SoaBreakdownCredentialsForm.tsx — unchanged
+src/components/providers/SoaBreakdownCredentialProvider.tsx   — unchanged
+src/app/soa-breakdown/layout.tsx                             — unchanged (provides QueryProvider + SoaBreakdownCredentialProvider)
+src/lib/utils/fee-categories.ts                              — unchanged
+src/lib/utils/breakdown-date-utils.ts                        — unchanged (dateFromRange, dateFromMonthRange)
+src/lib/utils/breakdown-format-utils.ts                      — unchanged (formatCurrency, formatCompactMonthYearRangeLabel, etc.)
+src/lib/schema/resident-breakdown.schema.ts                  — unchanged (ResidentDateRange, ResidentLedgerResponse types)
+```
+
+---
+
+## Port checklist for two-serendra-superapp (Jul 8 changes)
+
+All changes are frontend-only. No API or backend changes.
+
+- [ ] **1. Delete old history/results route and component**
+  - [ ] Delete the superapp equivalent of `ResidentBreakdownResults.tsx`
+  - [ ] Delete the superapp equivalent of `/soa-breakdown/results/page.tsx`
+
+- [ ] **2. Create new History component**
+  - [ ] Create `ResidentBreakdownHistory.tsx` with:
+    - [ ] Internal Fees/Payments tab state (not URL params)
+    - [ ] Pill-in-track tab switcher
+    - [ ] Collapsible Advanced Options (with `LuSlidersHorizontal` icon)
+    - [ ] CategoryPills inside Advanced Options for fee tab only
+    - [ ] Custom month range picker for both tabs
+    - [ ] Period pills (1 Month, 3 Months, 6 Months, This Year)
+    - [ ] Total display (₱ green bold)
+    - [ ] Back chevron header
+  - [ ] **Superapp-only additions:**
+    - [ ] Add **close (X) button** in header (top-right)
+    - [ ] Add **dismissible info banner** below header
+
+- [ ] **3. Create new History page route**
+  - [ ] Create `/soa-breakdown/history/page.tsx`
+  - [ ] Ensure parent layout provides credential + query providers
+
+- [ ] **4. Update SOA Breakdown main page**
+  - [ ] Add `LuChevronDown` icon next to balance — toggles split panel and rotates (`rotate-180`) when open.
+  - [ ] Add "History" text link next to it, aligned to the right. Both should use `text-sm text-green-700 hover:text-green-900`.
+  - [ ] Remove `Balances | Payments` tab pills and `TabButton` component
+  - [ ] Remove `UncreditedPayments` import and section (Remaining Credit in OutstandingFees covers it)
+  - [ ] Remove `view` state and `BreakdownView` type
+  - [ ] Remove `handleSeePast` / `onSeePast` plumbing
+
+- [ ] **5. Move CategoryPills into OutstandingFees**
+  - [ ] Add `selectedCategories` and `onCategoryChange` props to `OutstandingFees`
+  - [ ] Import and render `CategoryPills` inside the OutstandingFees card, after the heading
+  - [ ] Remove standalone `<CategoryPills>` from parent
+
+- [ ] **6. Update UncreditedPayments** (if still used elsewhere)
+  - [ ] Remove `onSeePast` prop
+  - [ ] Remove "See Past Payments" button
+  - [ ] Simplify header
+
+- [ ] **7. Update any links/references**
+  - [ ] Search for `/soa-breakdown/results` and replace with `/soa-breakdown/history`
+  - [ ] Search for `ResidentBreakdownResults` and replace with `ResidentBreakdownHistory`
+
+- [ ] **8. Icon dependencies**
+  - [ ] Ensure `react-icons` includes `LuChevronDown`, `LuChevronLeft`, `LuSlidersHorizontal` (all from `react-icons/lu`)
+
+- [ ] **9. Manual verification**
+  - [ ] SOA breakdown page: Split chevron (`LuChevronDown`) and History text link show on same line, right-aligned to balance.
+  - [ ] Click Split → balance split panel toggles
+  - [ ] Click History → navigates to `/soa-breakdown/history`
+  - [ ] History page: Fees tab active by default, shows total fees, period pills, settled fees list
+  - [ ] Switch to Payments tab: total changes, categories disappear from advanced options, past payments list shows
+  - [ ] Advanced Options toggle works, CategoryPills only on fee tab
+  - [ ] Custom date range works for both tabs
+  - [ ] Back chevron returns to `/soa-breakdown`
+  - [ ] CategoryPills appear inside OutstandingFees box on main page
+  - [ ] No UncreditedPayments section on main page
+  - [ ] Remaining Credit section inside OutstandingFees still works
+  - [ ] Select Fees button always visible (not gated by tab)
+
+---
+
+## Port notes (Jul 8 changes)
+
+1. **Route rename is the main breaking change.** Any deep links, bookmarks, or navigation calls using `/soa-breakdown/results` must update to `/soa-breakdown/history`. The `?kind=fee|payment` query param is no longer used.
+2. **`UncreditedPayments.tsx` still exists** in the codebase. It is not deleted, just no longer imported on the main page. If the superapp uses it elsewhere, leave it; otherwise it can be deleted.
+3. **CategoryPills is now a child of OutstandingFees**, not a sibling. Category state is still managed by the parent (`ResidentBreakdownRequest`) and passed down — the OutstandingFees component does not own it.
+4. **Two-serendra-superapp must add two things this repo intentionally omits:** the dismissible info banner and the close (X) button on the History page.
+5. **All data-fetching patterns are unchanged.** Same `fetchPastLedger`, same `useQuery` keys, same API endpoints. The History component just manages the `kind` internally instead of reading from URL params.
+
+---
+
+## Reference: finance-automations source of truth (Jul 8, 2026)
+
+Compare these files directly when porting:
+
+- `src/components/billing/breakdowns/ResidentBreakdownHistory.tsx` (NEW — replaces ResidentBreakdownResults)
+- `src/app/soa-breakdown/history/page.tsx` (NEW — replaces results/page.tsx)
+- `src/components/billing/breakdowns/ResidentBreakdownRequest.tsx` (MODIFIED)
+- `src/components/billing/breakdowns/OutstandingFees.tsx` (MODIFIED)
+- `src/components/billing/breakdowns/UncreditedPayments.tsx` (MODIFIED — onSeePast removed)
