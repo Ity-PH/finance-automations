@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 import { LuChevronDown } from "react-icons/lu";
+import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import type { FeeCategoryId } from "@/lib/utils/fee-categories";
 import {
   formatCurrency,
   formatDateDocnoLabel,
@@ -17,6 +19,8 @@ type OutstandingFeesProps = {
   selectedRowIds: Set<string>;
   onToggleRow: (id: string) => void;
   onToggleSelectAll: () => void;
+  selectedCategories: Set<FeeCategoryId>;
+  onCategoryChange: (next: Set<FeeCategoryId>) => void;
 };
 
 export function OutstandingFees({
@@ -28,6 +32,8 @@ export function OutstandingFees({
   selectedRowIds,
   onToggleRow,
   onToggleSelectAll,
+  selectedCategories,
+  onCategoryChange,
 }: OutstandingFeesProps) {
   const visibleRowIds = rows.map((row) => `${row.source}-${row.docno}`);
   const allVisibleSelected =
@@ -47,6 +53,13 @@ export function OutstandingFees({
             {allVisibleSelected ? "Unselect All" : "Select All"}
           </button>
         )}
+      </div>
+
+      <div className="mb-4">
+        <CategoryPills
+          selectedCategories={selectedCategories}
+          onChange={onCategoryChange}
+        />
       </div>
 
       {isLoading && <LoadingRows count={4} />}

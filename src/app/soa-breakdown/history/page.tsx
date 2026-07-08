@@ -2,11 +2,11 @@
 
 import { Suspense } from "react";
 import TabNav from "@/components/TabNav";
-import { ResidentBreakdownResults } from "@/components/billing/breakdowns/ResidentBreakdownResults";
+import { ResidentBreakdownHistory } from "@/components/billing/breakdowns/ResidentBreakdownHistory";
 import { SoaBreakdownCredentialsForm } from "@/components/billing/breakdowns/SoaBreakdownCredentialsForm";
 import { useSoaBreakdownCredentials } from "@/components/providers/SoaBreakdownCredentialProvider";
 
-export default function SoaBreakdownResultsPage() {
+export default function SoaBreakdownHistoryPage() {
   const { showBreakdown } = useSoaBreakdownCredentials();
 
   return (
@@ -23,7 +23,7 @@ export default function SoaBreakdownResultsPage() {
           <Suspense
             fallback={<p className="text-sm text-gray-500">Loading history...</p>}
           >
-            <ResidentBreakdownResults />
+            <ResidentBreakdownHistory />
           </Suspense>
         )}
       </div>

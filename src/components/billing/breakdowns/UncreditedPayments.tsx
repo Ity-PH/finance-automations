@@ -13,7 +13,6 @@ type UncreditedPaymentsProps = {
   isLoading: boolean;
   isError: boolean;
   onRetry: () => void;
-  onSeePast: () => void;
 };
 
 export function UncreditedPayments({
@@ -21,7 +20,6 @@ export function UncreditedPayments({
   isLoading,
   isError,
   onRetry,
-  onSeePast,
 }: UncreditedPaymentsProps) {
   const sortedRows = useMemo(
     () =>
@@ -35,20 +33,11 @@ export function UncreditedPayments({
 
   return (
     <section className="border border-gray-200 bg-white p-5">
-      <div className="mb-5 flex items-start justify-between gap-4">
-        <div>
-          <h3 className="text-lg font-bold">Uncredited Payments</h3>
-          <p className="mt-1 text-xs font-semibold text-gray-400">
-            Advance payments and payments not yet applied in full.
-          </p>
-        </div>
-        <button
-          type="button"
-          onClick={onSeePast}
-          className="shrink-0 text-sm font-semibold text-blue-600 hover:text-blue-800"
-        >
-          See Past Payments
-        </button>
+      <div className="mb-5">
+        <h3 className="text-lg font-bold">Uncredited Payments</h3>
+        <p className="mt-1 text-xs font-semibold text-gray-400">
+          Advance payments and payments not yet applied in full.
+        </p>
       </div>
 
       {isLoading && <LoadingRows />}
