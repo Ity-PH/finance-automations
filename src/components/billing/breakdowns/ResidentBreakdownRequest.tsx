@@ -200,7 +200,7 @@ export function ResidentBreakdownRequest() {
 
       <div className="grid grid-cols-2 gap-3">
         <TabButton selected={view === "fee"} onClick={() => setView("fee")}>
-          Fees
+          Balances
         </TabButton>
         <TabButton
           selected={view === "payment"}
@@ -220,13 +220,13 @@ export function ResidentBreakdownRequest() {
       {view === "fee" ? (
         <OutstandingFees
           rows={filteredRows}
+          creditRows={uncreditedPaymentRows}
           isLoading={outstandingQuery.isLoading}
           isError={outstandingQuery.isError}
           onRetry={() => outstandingQuery.refetch()}
           selectedRowIds={selectedRowIds}
           onToggleRow={toggleRow}
           onToggleSelectAll={toggleSelectAll}
-          onSeePast={() => handleSeePast("fee")}
         />
       ) : (
         <UncreditedPayments

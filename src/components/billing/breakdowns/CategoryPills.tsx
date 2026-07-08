@@ -18,7 +18,7 @@ export function CategoryPills({
   return (
     <div>
       <label className="mb-2 block text-xs font-bold uppercase tracking-widest text-gray-500">
-        Categories
+        Fee Categories
       </label>
       <div className="flex gap-2 overflow-x-auto pb-1">
         {CATEGORIES.map((category) => {
