@@ -35,10 +35,12 @@ export function OutstandingFees({
   selectedCategories,
   onCategoryChange,
 }: OutstandingFeesProps) {
-  const visibleRowIds = rows.map((row) => `${row.source}-${row.docno}`);
+  const feeRowIds = rows.map((row) => `${row.source}-${row.docno}`);
+  const creditRowIds = creditRows.map((row) => `${row.source}-${row.docno}`);
+  const allVisibleIds = [...feeRowIds, ...creditRowIds];
   const allVisibleSelected =
-    visibleRowIds.length > 0 &&
-    visibleRowIds.every((id) => selectedRowIds.has(id));
+    allVisibleIds.length > 0 &&
+    allVisibleIds.every((id) => selectedRowIds.has(id));
 
   return (
     <section className="border border-gray-200 bg-white p-5">
@@ -119,13 +121,25 @@ export function OutstandingFees({
       )}
 
       {!isLoading && !isError && creditRows.length > 0 && (
-        <RemainingCredit rows={creditRows} />
+        <RemainingCredit
+          rows={creditRows}
+          selectedRowIds={selectedRowIds}
+          onToggleRow={onToggleRow}
+        />
       )}
     </section>
   );
 }
 
-function RemainingCredit({ rows }: { rows: ResidentBreakdownRow[] }) {
+function RemainingCredit({
+  rows,
+  selectedRowIds,
+  onToggleRow,
+}: {
+  rows: ResidentBreakdownRow[];
+  selectedRowIds: Set<string>;
+  onToggleRow: (id: string) => void;
+}) {
   const [open, setOpen] = useState(false);
   const remainingCredit = rows.reduce(
     (sum, row) => sum + Math.abs(row.amount),
@@ -162,22 +176,45 @@ function RemainingCredit({ rows }: { rows: ResidentBreakdownRow[] }) {
             <span className="text-right">Original</span>
             <span className="text-right">Remaining</span>
           </div>
-          {rows.map((row, index) => (
-            <div
-              key={`${row.source}-${row.docno}-${index}`}
-              className="grid grid-cols-[1fr_96px_96px] items-start gap-2 px-3 py-3"
-            >
-              <p className="text-xs font-medium leading-relaxed text-gray-400">
-                {row.remarks || "No remarks"}
-              </p>
-              <p className="text-right text-xs font-bold tabular-nums text-gray-400">
-                {row.paidAmount != null ? formatCurrency(row.paidAmount) : "-"}
-              </p>
-              <p className="text-right text-xs font-bold tabular-nums">
-                {formatCurrency(Math.abs(row.amount))}
-              </p>
-            </div>
-          ))}
+          {rows.map((row, index) => {
+            const id = `${row.source}-${row.docno}`;
+            const isSelected = selectedRowIds.has(id);
+
+            return (
+              <button
+                key={`${row.source}-${row.docno}-${index}`}
+                type="button"
+                onClick={() => onToggleRow(id)}
+                className={`grid w-full grid-cols-[1fr_96px_96px] items-start gap-2 px-3 py-3 text-left transition-colors ${
+                  isSelected
+                    ? "bg-green-700 text-white"
+                    : "hover:bg-gray-50"
+                }`}
+              >
+                <p
+                  className={`text-xs font-medium leading-relaxed ${
+                    isSelected ? "text-green-50" : "text-gray-400"
+                  }`}
+                >
+                  {row.remarks || "No remarks"}
+                </p>
+                <p
+                  className={`text-right text-xs font-semibold tabular-nums ${
+                    isSelected ? "text-green-200" : "text-gray-400"
+                  }`}
+                >
+                  {row.paidAmount != null ? formatCurrency(row.paidAmount) : "-"}
+                </p>
+                <p
+                  className={`text-right text-xs font-bold tabular-nums ${
+                    isSelected ? "text-white" : "text-gray-900"
+                  }`}
+                >
+                  {formatCurrency(Math.abs(row.amount))}
+                </p>
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

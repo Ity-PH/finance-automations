@@ -92,8 +92,12 @@ export function ResidentBreakdownRequest() {
       const id = `${row.source}-${row.docno}`;
       if (selectedRowIds.has(id)) sum += Math.abs(row.amount);
     });
+    uncreditedPaymentRows.forEach((row) => {
+      const id = `${row.source}-${row.docno}`;
+      if (selectedRowIds.has(id)) sum -= Math.abs(row.amount);
+    });
     return sum;
-  }, [filteredRows, selectedRowIds]);
+  }, [filteredRows, uncreditedPaymentRows, selectedRowIds]);
 
   const toggleRow = (id: string) => {
     setSelectedRowIds((prev) => {
@@ -105,17 +109,21 @@ export function ResidentBreakdownRequest() {
   };
 
   const toggleSelectAll = () => {
-    const visibleIds = filteredRows.map((row) => `${row.source}-${row.docno}`);
+    const feeIds = filteredRows.map((row) => `${row.source}-${row.docno}`);
+    const creditIds = uncreditedPaymentRows.map(
+      (row) => `${row.source}-${row.docno}`,
+    );
+    const allIds = [...feeIds, ...creditIds];
     const allSelected =
-      visibleIds.length > 0 &&
-      visibleIds.every((id) => selectedRowIds.has(id));
+      allIds.length > 0 &&
+      allIds.every((id) => selectedRowIds.has(id));
 
     setSelectedRowIds((prev) => {
       const next = new Set(prev);
       if (allSelected) {
-        visibleIds.forEach((id) => next.delete(id));
+        allIds.forEach((id) => next.delete(id));
       } else {
-        visibleIds.forEach((id) => next.add(id));
+        allIds.forEach((id) => next.add(id));
       }
       return next;
     });
@@ -228,8 +236,10 @@ export function ResidentBreakdownRequest() {
         }`}
       >
         {selectedRowIds.size > 0
-          ? `Selected ₱${formatCurrency(selectedSum)}`
-          : "Select Fees"}
+          ? selectedSum < 0
+            ? `Total: ₱ (${formatCurrency(Math.abs(selectedSum))})`
+            : `Total: ₱ ${formatCurrency(selectedSum)}`
+          : "Select Items"}
       </button>
     </div>
   );
