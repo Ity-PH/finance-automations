@@ -4,7 +4,12 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { LuChevronLeft, LuSlidersHorizontal } from "react-icons/lu";
-import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import {
+  CategoryPills,
+  SourceFilterPills,
+  rowMatchesSourceFilter,
+  type SourceFilterId,
+} from "@/components/billing/breakdowns/CategoryPills";
 import {
   filterRowsByCategories,
   type FeeCategoryId,
@@ -106,6 +111,9 @@ export function ResidentBreakdownHistory() {
   const [selectedCategories, setSelectedCategories] = useState<
     Set<FeeCategoryId>
   >(new Set());
+  const [selectedSourceFilter, setSelectedSourceFilter] = useState<
+    Set<SourceFilterId>
+  >(new Set());
   const [advancedOpen, setAdvancedOpen] = useState(false);
 
   const { dateFrom, dateTo } = useMemo(() => {
@@ -153,9 +161,18 @@ export function ResidentBreakdownHistory() {
 
   const displayRows = useMemo(() => {
     const rows = ledgerQuery.data?.rows ?? [];
-    if (isPayment) return rows;
+    if (isPayment) {
+      return rows.filter((row) =>
+        rowMatchesSourceFilter(row.source, selectedSourceFilter),
+      );
+    }
     return filterRowsByCategories(rows, selectedCategories);
-  }, [isPayment, ledgerQuery.data?.rows, selectedCategories]);
+  }, [
+    isPayment,
+    ledgerQuery.data?.rows,
+    selectedCategories,
+    selectedSourceFilter,
+  ]);
 
   const total = displayRows.reduce((sum, row) => sum + Math.abs(row.amount), 0);
 
@@ -276,10 +293,14 @@ export function ResidentBreakdownHistory() {
               />
             )}
 
+            {isPayment && (
+              <SourceFilterPills
+                selected={selectedSourceFilter}
+                onChange={setSelectedSourceFilter}
+              />
+            )}
+
             <div>
-              <h3 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-400">
-                Custom Range
-              </h3>
               <div className="grid gap-4 sm:grid-cols-2">
                 <MonthYearSelect
                   label="Start"
@@ -313,7 +334,7 @@ export function ResidentBreakdownHistory() {
                     : "bg-black text-white hover:bg-gray-800"
                 }`}
               >
-                Apply Custom Range
+                Apply Range
               </button>
             </div>
           </div>
