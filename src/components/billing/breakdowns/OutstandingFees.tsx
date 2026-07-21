@@ -2,7 +2,12 @@
 
 import { useState } from "react";
 import { LuChevronDown } from "react-icons/lu";
-import { CategoryPills } from "@/components/billing/breakdowns/CategoryPills";
+import {
+  CategoryPills,
+  SourceFilterPills,
+  rowMatchesSourceFilter,
+  type SourceFilterId,
+} from "@/components/billing/breakdowns/CategoryPills";
 import type { FeeCategoryId } from "@/lib/utils/fee-categories";
 import {
   formatCurrency,
@@ -141,9 +146,16 @@ function RemainingCredit({
   onToggleRow: (id: string) => void;
 }) {
   const [open, setOpen] = useState(false);
+  const [creditFilter, setCreditFilter] = useState<Set<SourceFilterId>>(
+    new Set(),
+  );
   const remainingCredit = rows.reduce(
     (sum, row) => sum + Math.abs(row.amount),
     0,
+  );
+
+  const visibleRows = rows.filter((row) =>
+    rowMatchesSourceFilter(row.source, creditFilter),
   );
 
   return (
@@ -154,7 +166,7 @@ function RemainingCredit({
         className="flex w-full items-center justify-between gap-4 px-3 py-3 text-left transition-colors hover:bg-gray-50"
       >
         <span>
-          <span className="block text-sm font-bold">Remaining Credit</span>
+          <span className="block text-lg font-bold">Remaining Credit</span>
           <span className="mt-0.5 block text-xs font-medium text-gray-400">
             {rows.length} payments · Tap to view
           </span>
@@ -171,12 +183,15 @@ function RemainingCredit({
 
       {open && (
         <div>
+          <div className="mb-2 px-3">
+            <SourceFilterPills selected={creditFilter} onChange={setCreditFilter} />
+          </div>
           <div className="grid grid-cols-[1fr_96px_96px] gap-2 px-3 pb-2 text-[10px] font-semibold uppercase tracking-widest text-gray-400">
             <span />
             <span className="text-right">Original</span>
             <span className="text-right">Remaining</span>
           </div>
-          {rows.map((row, index) => {
+          {visibleRows.map((row, index) => {
             const id = `${row.source}-${row.docno}`;
             const isSelected = selectedRowIds.has(id);
 
