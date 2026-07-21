@@ -20,7 +20,9 @@ type CredentialContextValue = {
   credentials: BreakdownCredentials;
   showBreakdown: boolean;
   hasCredentials: boolean;
+  reconciliationBlocked: boolean;
   viewBreakdown: (next: BreakdownCredentials) => void;
+  setReconciliationBlocked: (blocked: boolean) => void;
 };
 
 const defaultCredentials: BreakdownCredentials = {
@@ -38,6 +40,7 @@ export function SoaBreakdownCredentialProvider({
   const [credentials, setCredentials] =
     useState<BreakdownCredentials>(defaultCredentials);
   const [showBreakdown, setShowBreakdown] = useState(false);
+  const [reconciliationBlocked, setReconciliationBlocked] = useState(false);
 
   useEffect(() => {
     window.localStorage.removeItem(LEGACY_STORAGE_KEY);
@@ -50,6 +53,7 @@ export function SoaBreakdownCredentialProvider({
     };
     setCredentials(normalized);
     setShowBreakdown(true);
+    setReconciliationBlocked(false);
   }, []);
 
   const value = useMemo<CredentialContextValue>(
@@ -58,9 +62,11 @@ export function SoaBreakdownCredentialProvider({
       showBreakdown,
       hasCredentials:
         showBreakdown && credentials.bpcode.trim().length > 0,
+      reconciliationBlocked,
       viewBreakdown,
+      setReconciliationBlocked,
     }),
-    [credentials, showBreakdown, viewBreakdown],
+    [credentials, showBreakdown, reconciliationBlocked, viewBreakdown],
   );
 
   return (
