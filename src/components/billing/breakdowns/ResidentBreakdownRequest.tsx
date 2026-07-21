@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { LuChevronDown } from "react-icons/lu";
@@ -17,6 +17,7 @@ import {
   formatCompactDate,
   formatCurrency,
 } from "@/lib/utils/breakdown-format-utils";
+import { parseApiDate } from "@/lib/utils/breakdown-date-utils";
 import type { ResidentLedgerResponse } from "@/lib/schema/resident-breakdown.schema";
 
 type ApiResponse<T> = { success: boolean; data?: T; error?: string };
@@ -45,7 +46,7 @@ function formatBalanceDisplay(raw?: string): string {
 }
 
 export function ResidentBreakdownRequest() {
-  const { credentials, hasCredentials } = useSoaBreakdownCredentials();
+  const { credentials, hasCredentials, reconciliationBlocked, setReconciliationBlocked } = useSoaBreakdownCredentials();
   const [selectedCategories, setSelectedCategories] = useState<
     Set<FeeCategoryId>
   >(new Set());
@@ -66,6 +67,14 @@ export function ResidentBreakdownRequest() {
   const slowMessage = useSlowLoadingMessage(outstandingQuery.isLoading);
   const queueDepth = useQueueDepth(outstandingQuery.isLoading);
   const meta = outstandingQuery.data?.meta;
+
+  useEffect(() => {
+    if (!meta) return;
+    const blocked =
+      meta.duesFloatingCreditReconciliation === "aggregate_only" ||
+      meta.electricityFloatingCreditReconciliation === "aggregate_only";
+    setReconciliationBlocked(blocked);
+  }, [meta, setReconciliationBlocked]);
 
   const loadingMessage = (() => {
     if (queueDepth !== null && queueDepth >= 2)
@@ -137,6 +146,13 @@ export function ResidentBreakdownRequest() {
 
   return (
     <div className="space-y-6">
+      {reconciliationBlocked && (
+        <p className="text-xs font-medium text-red-600">
+          Cannot reconcile and reflect payments for this unit due to possible bugs in the
+          EBT. This unit currently cannot access SOA breakdowns on the Two
+          Serendra App.
+        </p>
+      )}
       <InspectedUnitLabel />
       <section>
         <p className="text-xs font-bold uppercase tracking-widest text-gray-500">
