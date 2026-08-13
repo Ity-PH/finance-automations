@@ -6,15 +6,17 @@ import JSZip from "jszip";
 import TabNav from "@/components/TabNav";
 
 type Recipient = {
+  unitNo: string;
   unitCode: string;
-  name: string;
-  email: string;
+  ownerEmail: string;
+  tenantEmail: string;
 };
 
 type MatchedNotice = {
+  unitNo: string;
   unitCode: string;
-  name: string;
-  email: string;
+  ownerEmail: string;
+  tenantEmail: string;
   filename: string;
   matched: boolean;
 };
@@ -33,6 +35,45 @@ export default function SendNotices() {
   const [isSending, setIsSending] = useState(false);
   const [sendResult, setSendResult] = useState<string | null>(null);
 
+  const REQUIRED_HEADERS = ["unit nos.", "ebtunitcode", "owner", "tenant"] as const;
+
+  // ponytail: #N/A is the only "keep" sentinel; anything else (blank, text, error) = exclude
+  const shouldExclude = (val: unknown): boolean => String(val ?? "").trim() !== "#N/A";
+
+  /** Lowercase all keys so header matching is case-insensitive */
+  const normalizeKeys = (row: Record<string, unknown>): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(row)) out[k.trim().toLowerCase()] = row[k];
+    return out;
+  };
+
+  /**
+   * Parse rows from sheet JSON into Recipient[], filtering excluded rows.
+   */
+  const parseRows = (json: Record<string, unknown>[]): Recipient[] | string => {
+    if (json.length === 0) return "File has no data rows.";
+
+    const normalized = json.map(normalizeKeys);
+    const keys = Object.keys(normalized[0]);
+    const missing = REQUIRED_HEADERS.filter((h) => !keys.includes(h));
+    if (missing.length > 0) {
+      return `Missing required columns: ${missing.join(", ")}. Found: ${Object.keys(json[0]).join(", ")}`;
+    }
+
+    // ponytail: EXCLUDE column optional — no column = include all
+    const hasExclude = keys.includes("exclude");
+
+    return normalized
+      .filter((row) => !hasExclude || !shouldExclude(row["exclude"]))
+      .filter((row) => row["ebtunitcode"]) // skip empty rows
+      .map((row) => ({
+        unitNo: String(row["unit nos."] ?? "").trim(),
+        unitCode: String(row["ebtunitcode"] ?? "").trim(),
+        ownerEmail: String(row["owner"] ?? "").trim(),
+        tenantEmail: String(row["tenant"] ?? "").trim(),
+      }));
+  };
+
   // --- Parse Excel / CSV ---
   const handleRecipientUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -45,74 +86,27 @@ export default function SendNotices() {
 
     try {
       const ext = file.name.split(".").pop()?.toLowerCase();
+      let json: Record<string, unknown>[];
 
       if (ext === "csv") {
         const text = await file.text();
-        const lines = text.split("\n").map((l) => l.trim()).filter(Boolean);
-        if (lines.length < 2) {
-          setRecipientError("CSV file is empty or has no data rows.");
-          return;
-        }
-
-        const headers = lines[0].split(",").map((h) => h.trim());
-        const iUnit = headers.indexOf("eBTUnitCode");
-        const iName = headers.indexOf("CustomerName");
-        const iEmail = headers.indexOf("CustomerEmail");
-
-        if (iUnit === -1 || iName === -1 || iEmail === -1) {
-          setRecipientError(
-            `Missing required columns. Expected: eBTUnitCode, CustomerName, CustomerEmail. Found: ${headers.join(", ")}`
-          );
-          return;
-        }
-
-        const parsed: Recipient[] = [];
-        for (let i = 1; i < lines.length; i++) {
-          const cols = lines[i].split(",").map((c) => c.trim());
-          if (cols[iUnit] && cols[iEmail]) {
-            parsed.push({
-              unitCode: cols[iUnit],
-              name: cols[iName] || "",
-              email: cols[iEmail],
-            });
-          }
-        }
-        setRecipients(parsed);
+        const workbook = XLSX.read(text, { type: "string" });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
       } else {
-        // xlsx / xls
         const buffer = await file.arrayBuffer();
         const workbook = XLSX.read(buffer, { type: "array" });
         const sheet = workbook.Sheets[workbook.SheetNames[0]];
-        const json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
-
-        if (json.length === 0) {
-          setRecipientError("Excel file has no data rows.");
-          return;
-        }
-
-        const firstRow = json[0];
-        if (
-          !("eBTUnitCode" in firstRow) ||
-          !("CustomerName" in firstRow) ||
-          !("CustomerEmail" in firstRow)
-        ) {
-          const found = Object.keys(firstRow).join(", ");
-          setRecipientError(
-            `Missing required columns. Expected: eBTUnitCode, CustomerName, CustomerEmail. Found: ${found}`
-          );
-          return;
-        }
-
-        const parsed: Recipient[] = json
-          .filter((row) => row["eBTUnitCode"] && row["CustomerEmail"])
-          .map((row) => ({
-            unitCode: String(row["eBTUnitCode"]),
-            name: String(row["CustomerName"] || ""),
-            email: String(row["CustomerEmail"]),
-          }));
-
-        setRecipients(parsed);
+        json = XLSX.utils.sheet_to_json<Record<string, unknown>>(sheet);
       }
+
+      const result = parseRows(json);
+      if (typeof result === "string") {
+        setRecipientError(result);
+        return;
+      }
+
+      setRecipients(result);
     } catch (err) {
       console.error("Recipient parse error:", err);
       setRecipientError("Failed to parse file. Check format and try again.");
@@ -163,17 +157,19 @@ export default function SendNotices() {
       if (recipient) {
         matchedUnitCodes.add(unitCode);
         result.push({
+          unitNo: recipient.unitNo,
           unitCode: recipient.unitCode,
-          name: recipient.name,
-          email: recipient.email,
+          ownerEmail: recipient.ownerEmail,
+          tenantEmail: recipient.tenantEmail,
           filename,
           matched: true,
         });
       } else {
         result.push({
+          unitNo: "",
           unitCode: unitCode || filename,
-          name: "",
-          email: "",
+          ownerEmail: "",
+          tenantEmail: "",
           filename,
           matched: false,
         });
@@ -184,9 +180,10 @@ export default function SendNotices() {
     for (const r of recipients) {
       if (!matchedUnitCodes.has(r.unitCode)) {
         result.push({
+          unitNo: r.unitNo,
           unitCode: r.unitCode,
-          name: r.name,
-          email: r.email,
+          ownerEmail: r.ownerEmail,
+          tenantEmail: r.tenantEmail,
           filename: "",
           matched: false,
         });
@@ -210,18 +207,22 @@ export default function SendNotices() {
     try {
       const matched = matches.filter((m) => m.matched);
 
-      const jobs = await Promise.all(
-        matched.map(async (m) => {
-          const pdfBase64 = await zip.file(m.filename)!.async("base64");
-          return {
-            to: m.email,
-            customerName: m.name,
-            unitCode: m.unitCode,
-            filename: m.filename,
-            pdfBase64,
-          };
-        })
-      );
+      // ponytail: flatten to one job per email — a unit with both owner+tenant = two jobs
+      const jobs = (
+        await Promise.all(
+          matched.map(async (m) => {
+            const pdfBase64 = await zip.file(m.filename)!.async("base64");
+            const emails = [m.ownerEmail, m.tenantEmail].filter(Boolean);
+            return emails.map((email) => ({
+              to: email,
+              customerName: m.unitNo,
+              unitCode: m.unitCode,
+              filename: m.filename,
+              pdfBase64,
+            }));
+          })
+        )
+      ).flat();
 
       const res = await fetch("/api/send-notices", {
         method: "POST",
@@ -299,7 +300,7 @@ export default function SendNotices() {
         )}
         {recipients && !recipientError && (
           <p className="mt-3 text-xs text-gray-500">
-            ✓ Parsed <strong>{recipients.length}</strong> recipients
+            ✓ Parsed <strong>{recipients.length}</strong> recipients (excluded rows filtered out)
           </p>
         )}
       </section>
@@ -358,13 +359,16 @@ export default function SendNotices() {
               <thead>
                 <tr className="border-b border-gray-300 bg-gray-50 text-left">
                   <th className="px-3 py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
-                    Unit Code
+                    Unit
                   </th>
                   <th className="px-3 py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
-                    Customer Name
+                    eBT Code
                   </th>
                   <th className="px-3 py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
-                    Email
+                    Owner
+                  </th>
+                  <th className="px-3 py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
+                    Tenant
                   </th>
                   <th className="px-3 py-2 text-xs font-bold uppercase tracking-widest text-gray-500">
                     File
@@ -382,9 +386,10 @@ export default function SendNotices() {
                       !m.matched ? "bg-red-50" : ""
                     }`}
                   >
+                    <td className="px-3 py-2">{m.unitNo || "—"}</td>
                     <td className="px-3 py-2">{m.unitCode}</td>
-                    <td className="px-3 py-2">{m.name || "—"}</td>
-                    <td className="px-3 py-2">{m.email || "—"}</td>
+                    <td className="px-3 py-2">{m.ownerEmail || "—"}</td>
+                    <td className="px-3 py-2">{m.tenantEmail || "—"}</td>
                     <td className="px-3 py-2">{m.filename || "—"}</td>
                     <td className="px-3 py-2">
                       {m.matched ? (
